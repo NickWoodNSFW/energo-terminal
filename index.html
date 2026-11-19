@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Энерго-Терминал</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#090b0e">
+<meta name="description" content="Асинхронный контроль когнитивного ресурса. Сравнение только с собой из прошлого.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Терминал">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<div class="wrap">
+  <header class="hdr">
+    <h1>Энерго-Терминал</h1>
+    <div class="hdr-tools">
+      <span class="ver">v3.0</span>
+      <button type="button" class="ghost sm" id="helpBtn" aria-label="Как считается заряд">?</button>
+      <button type="button" class="ghost sm" id="dataBtn" aria-label="Данные и синхронизация">⚙</button>
+    </div>
+  </header>
+
+  <nav id="tabs" class="tabs" role="tablist" aria-label="Разделы"></nav>
+
+  <main id="view" role="main"></main>
+</div>
+
+<button type="button" class="fab" id="fabBtn" aria-label="Записать мысль в захват">+</button>
+
+<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+  <div class="modal__box" id="modalBox"></div>
+</div>
+
+<div id="errbar" role="alert" aria-live="assertive">
+  <button type="button" id="errclose" aria-label="Скрыть сообщение">×</button>
+  <span id="errtext"></span>
+</div>
+
+<script>
+(function () {
+  var bar = document.getElementById("errbar");
+  var txt = document.getElementById("errtext");
+  var close = document.getElementById("errclose");
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c];
+    });
+  }
+  function notice(msg) {
+    if (!bar || !txt) return;
+    txt.innerHTML = msg;
+    bar.style.display = "block";
+  }
+  close.onclick = function () { bar.style.display = "none"; };
+
+  window.addEventListener("error", function (e) {
+    if (!e || !e.message) return;
+    var where = e.filename ? String(e.filename).split("/").pop() + ":" + (e.lineno || "?") : "";
+    notice("Посторонняя ошибка страницы: " + esc(e.message) + (where ? " · " + esc(where) : "") +
+      ". Если интерфейс ниже работает, это не приложение — обычно расширение браузера.");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason;
+    notice("Необработанный сбой: " + esc((r && r.message) || r || "неизвестно"));
+  });
+
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      var v = document.getElementById("view");
+      if (v && !v.innerHTML.trim()) {
+        v.innerHTML = '<section class="card"><h2>Приложение не запустилось</h2>' +
+          '<p class="dim">Откройте консоль: F12 → Console, и пришлите первую красную строку.</p></section>';
+      }
+    }, 1500);
+  });
+})();
+</script>
+<script src="app.js"></script>
+</body>
+</html>
