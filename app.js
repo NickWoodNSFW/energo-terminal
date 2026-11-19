@@ -1336,19 +1336,54 @@
     } catch (e) { toast("Ошибка: " + e.message); }
   }
 
+  function cleanToken(s) {
+    return String(s || "").trim().replace(/^OAuth\s+/i, "").replace(/^["'«»\s]+|["'«»\s]+$/g, "").trim();
+  }
+
+  async function ydCheck() {
+    const r = await fetch(YD_API + "/resources?path=" + encodeURIComponent("app:/"), { headers: ydHeaders() });
+    if (r.status === 401) throw new Error("токен не подошёл (401)");
+    if (r.status === 403) throw new Error("нет права на папку приложения — при регистрации нужно cloud_api:disk.app_folder");
+    if (!r.ok) throw new Error("Диск ответил " + r.status);
+    return true;
+  }
+
+  async function adoptToken(raw) {
+    const tk = cleanToken(raw);
+    if (!tk) { toast("Вставьте токен со страницы Яндекса"); return; }
+    S.sync.token = tk; save();
+    try {
+      await ydCheck();
+      S.sync.lastSync = nowISO(); save(); closeModal(); render();
+      toast("Диск подключён, папка приложения доступна");
+    } catch (e) {
+      closeModal(); render();
+      toast("Токен сохранён, но " + e.message);
+    }
+  }
+
   function openConnectSheet() {
     openModal({
       title: "Подключить Яндекс.Диск",
-      html: "<p>Приложение пишет один файл в свою папку на Диске. Доступ к остальному не нужен, токен остаётся на этом устройстве.</p>" +
-        "<p class=\"note\">Нужен client_id вашего приложения с oauth.yandex.ru. Порядок создания — в energo-terminal-deploy.md. Авторизация работает только по адресу https, то есть после выкладки.</p>",
-      fields: [{ key: "cid", label: "client_id", value: S.sync.clientId || "" }],
+      html: "<p>Приложение пишет один файл в свою папку на Диске. Доступ к остальному не нужно, токен остаётся на этом устройстве.</p>" +
+        "<p class=\"note\">1. На oauth.yandex.ru создайте приложение и отметьте право <b>cloud_api:disk.app_folder</b>.<br>" +
+        "2. Впишите client_id ниже и нажмите «Открыть авторизацию».<br>" +
+        "3. Яндекс покажет access_token — скопируйте его и вставьте во второе поле.</p>",
+      fields: [
+        { key: "cid", label: "client_id", value: S.sync.clientId || "" },
+        { key: "tok", label: "access_token", value: "" }
+      ],
       actions: [
         { label: "Отмена", onClick: closeModal },
-        { label: "Открыть авторизацию", kind: "primary", onClick: (v) => {
+        { label: "Открыть авторизацию", onClick: (v) => {
             const cid = (v.cid || "").trim();
             if (!cid) { toast("Нужен client_id"); return; }
             S.sync.clientId = cid; save();
             location.href = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + encodeURIComponent(cid);
+          } },
+        { label: "Сохранить токен", kind: "primary", onClick: (v) => {
+            S.sync.clientId = (v.cid || "").trim(); save();
+            adoptToken(v.tok);
           } }
       ]
     });
@@ -1368,7 +1403,9 @@
       actions: [
         { label: on ? "Выгрузить" : "Подключить", onClick: () => { closeModal(); on ? syncPush() : openConnectSheet(); } },
         { label: "Забрать и слить", onClick: () => { closeModal(); syncPull(); } },
-        { label: "Закрыть", kind: "primary", onClick: closeModal }
+        on ? { label: "Токен", onClick: () => { closeModal(); openConnectSheet(); } }
+           : { label: "Закрыть", kind: "primary", onClick: closeModal },
+        on ? { label: "Закрыть", kind: "primary", onClick: closeModal } : { label: "Файлом", onClick: () => { closeModal(); act("export"); } }
       ]
     });
   }
