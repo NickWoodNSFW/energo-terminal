@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v21";
+  const BUILD = "et-v23";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -80,6 +80,8 @@
       if (s.kind === "drain" && !s.mode) s.mode = s.title === "Голосовой YouTube фоном" ? "ambient" : "capture";
       if (!s.updated_at) s.updated_at = nowISO();
     }
+    const cap = Date.now() + p.config.residue_min * 60000;
+    if (p.runtime.residue_until && p.runtime.residue_until > cap) p.runtime.residue_until = cap;
     return p;
   }
 
@@ -1278,23 +1280,22 @@
 
   function mergeStates(a, b) {
     const out = JSON.parse(JSON.stringify(a));
+    const skew = (((b.sync && b.sync.clock_offset) || 0) - ((a.sync && a.sync.clock_offset) || 0));
+    const at = (iso, shift) => (Date.parse(iso || 0) || 0) + (shift || 0);
     for (const key of ["checkpoints", "quests", "captures", "sessions", "interruptions"]) {
       const map = new Map();
       for (const r of out[key] || []) map.set(r.id, r);
       for (const r of b[key] || []) {
         const cur = map.get(r.id);
         if (!cur) { map.set(r.id, r); continue; }
-        const ta = Date.parse(cur.updated_at || 0) || 0;
-        const tb = Date.parse(r.updated_at || 0) || 0;
-        if (tb > ta) map.set(r.id, r);
+        if (at(r.updated_at, skew) > at(cur.updated_at, 0)) map.set(r.id, r);
       }
       out[key] = Array.from(map.values());
     }
-    const newer = (x, y) => Math.max(0, ...(y || []).map((s) => Date.parse(s.updated_at || 0) || 0)) >
-                           Math.max(0, ...(x || []).map((s) => Date.parse(s.updated_at || 0) || 0));
-    out.slots = newer(a.slots, b.slots) ? b.slots : a.slots;
+    const newest = (arr, shift) => Math.max(0, ...(arr || []).map((s) => at(s.updated_at, shift)));
+    out.slots = newest(b.slots, skew) > newest(a.slots, 0) ? b.slots : a.slots;
     out.config = Object.assign({}, a.config, b.config);
-    if (Date.parse(b.runtime.battery_at || 0) > Date.parse(a.runtime.battery_at || 0)) {
+    if (at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0)) {
       out.runtime = Object.assign({}, a.runtime, { base: b.runtime.base, battery: b.runtime.battery, battery_at: b.runtime.battery_at });
     }
     return migrate(out);
@@ -1403,6 +1404,7 @@
     if (!S.sync.gistId) await ghFindGist();
     if (!S.sync.gistId) return null;
     const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { headers: ghHeaders(), cache: "no-store" });
+    noteServerTime(r);
     if (r.status === 404) { S.sync.gistId = ""; save({ sync: false }); return null; }
     if (!r.ok) throw new Error("GitHub ответил " + r.status);
     const j = await r.json();
@@ -1425,14 +1427,25 @@
     if (!S.sync.gistId) await ghFindGist();
     if (S.sync.gistId) {
       const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { method: "PATCH", headers: ghHeaders(), body });
+      noteServerTime(r);
       if (!r.ok) throw new Error("GitHub не принял обновление: " + r.status);
       return;
     }
     const r = await fetch(GH_API + "/gists", { method: "POST", headers: ghHeaders(), body });
+    noteServerTime(r);
     if (!r.ok) throw new Error("GitHub не создал хранилище: " + r.status);
     const j = await r.json();
     S.sync.gistId = j.id;
     save({ sync: false });
+  }
+
+  function noteServerTime(r) {
+    try {
+      const d = r && r.headers && r.headers.get("Date");
+      if (!d) return;
+      const t = Date.parse(d);
+      if (isFinite(t)) S.sync.clock_offset = t - Date.now();
+    } catch (e) { /* заголовок недоступен */ }
   }
 
   function cloudOn() { return !!(S.sync.ghToken || S.sync.token); }
@@ -1461,76 +1474,63 @@
     syncTimer = setTimeout(() => { syncTimer = null; autoSync(); }, YD_DEBOUNCE);
   }
 
-  async function autoSync() {
-    if (!S.sync || !cloudOn() || !S.sync.auto) return;
-    if (typeof fetch !== "function") return;
-    if (syncBusy) { syncAgain = true; return; }
-    if (stateFingerprint() === pushedFp) return;
-    syncBusy = true;
-    try {
-      let merged = false;
-      const txt = await cloudDownload();
-      if (txt) {
-        let data = null;
-        try { data = JSON.parse(txt); } catch (e) { data = null; }
-        const foreign = data && data.meta && data.meta.device_id && data.meta.device_id !== S.meta.device_id;
-        const remoteAt = Date.parse((data && data.sync && data.sync.lastSync) || 0) || 0;
-        const localAt = Date.parse(S.sync.lastSync || 0) || 0;
-        if (data && hasData(data) && (!hasData(S) || (foreign && remoteAt > localAt)) && !modalOpen()) {
-          S = mergeStates(S, data);
-          S.sync.lastDevice = data.meta.device_id;
-          merged = true;
-        }
-      }
-      S.sync.lastSync = nowISO();
-      S.sync.lastError = null;
-      save({ sync: false });
-      await cloudUpload(JSON.stringify(stateForCloud()));
-      pushedFp = stateFingerprint();
-      if (merged) render();
-      updateSyncHint();
-    } catch (e) {
-      S.sync.lastError = e.message;
-      save({ sync: false });
-      updateSyncHint();
-    } finally {
-      syncBusy = false;
-      if (syncAgain) { syncAgain = false; scheduleSync(); }
-    }
-  }
-
   function recordsKey(st) {
     const part = (arr) => (arr || []).map((r) => r.id + ":" + (r.updated_at || "")).sort().join(",");
     return ["checkpoints", "captures", "quests", "sessions", "interruptions", "slots"]
       .map((k) => part(st[k])).join("|");
   }
 
-  async function pollCloud() {
-    if (!S.sync || !cloudOn() || !S.sync.auto) return;
-    if (typeof fetch !== "function") return;
-    if (syncBusy || modalOpen() || document.visibilityState !== "visible") return;
+  async function mergeRemote() {
+    const txt = await cloudDownload();
+    if (!txt) return false;
+    let data = null;
+    try { data = JSON.parse(txt); } catch (e) { data = null; }
+    if (!data || !hasData(data)) return false;
+    if (data.meta && data.meta.device_id === S.meta.device_id) return false;
+    if (modalOpen()) return false;
+    const comb = mergeStates(S, data);
+    if (recordsKey(comb) === recordsKey(S)) return false;
+    S = comb;
+    S.sync.lastDevice = (data.meta && data.meta.device_id) || S.sync.lastDevice;
+    return true;
+  }
+
+  async function syncOnce() {
+    if (!S.sync || !cloudOn() || !S.sync.auto) return false;
+    if (typeof fetch !== "function") return false;
+    if (syncBusy) { syncAgain = true; return false; }
     syncBusy = true;
     try {
-      const txt = await cloudDownload();
-      if (!txt) return;
-      let data = null;
-      try { data = JSON.parse(txt); } catch (e) { data = null; }
-      if (!data || !hasData(data)) return;
-      if (data.meta && data.meta.device_id === S.meta.device_id) return;
-      const merged = mergeStates(S, data);
-      if (recordsKey(merged) === recordsKey(S)) return;
-      S = merged;
+      const merged = await mergeRemote();
+      if (!merged && stateFingerprint() === pushedFp) { updateSyncHint(); return false; }
       S.sync.lastSync = nowISO();
       S.sync.lastError = null;
       save({ sync: false });
-      render();
+      await cloudUpload(JSON.stringify(stateForCloud()));
+      pushedFp = stateFingerprint();
+      if (merged) { render(); toast("Подтянул изменения из облака"); }
       updateSyncHint();
-      toast("Подтянул изменения из облака");
+      return merged;
     } catch (e) {
       S.sync.lastError = e.message;
       save({ sync: false });
       updateSyncHint();
-    } finally { syncBusy = false; }
+      return false;
+    } finally {
+      syncBusy = false;
+      if (syncAgain) { syncAgain = false; setTimeout(() => { syncOnce(); }, 3000); }
+    }
+  }
+
+  function autoSync() { return syncOnce(); }
+
+  let lastPollAt = 0;
+  function pollCloud() {
+    if (modalOpen()) return false;
+    const now = Date.now();
+    if (document.visibilityState !== "visible" && now - lastPollAt < 4 * 60000) return false;
+    lastPollAt = now;
+    return syncOnce();
   }
 
   function updateSyncHint() {
@@ -1918,12 +1918,13 @@
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
-      if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; autoSync(); }
+      if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+      syncOnce();
     } else {
-      autoSync();
-      pollCloud();
+      syncOnce();
     }
   });
+  window.addEventListener("focus", () => { pollCloud(); });
 
   if (startupError) {
     const msg = (startupError && startupError.stack) || String(startupError);
