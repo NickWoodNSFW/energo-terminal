@@ -129,15 +129,15 @@
     const backup = readKey(BACKUP_KEY);
     if (backup) states.push({ key: BACKUP_KEY, state: backup });
 
-    const hasData = (s) => s.checkpoints.length + s.captures.length + s.sessions.length > 0;
-    const withData = states.filter((x) => hasData(x.state));
+    const hasRecords = (s) => !!(s && (s.checkpoints.length + s.captures.length + s.sessions.length > 0));
+    const withData = states.filter((x) => hasRecords(x.state));
     if (!withData.length) return states.length ? states[0].state : fresh();
     if (withData.length === 1) {
       restoredFromLegacy = withData[0].key !== KEY && withData[0].state.checkpoints.length > 0;
       return withData[0].state;
     }
     restoredFromLegacy = true;
-    return withData.reduce((acc, x) => mergeStates(acc, x.state));
+    return withData.slice(1).reduce((acc, x) => mergeStates(acc, x.state), withData[0].state);
   }
 
   function save(opts) {
