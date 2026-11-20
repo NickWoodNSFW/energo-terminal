@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v30";
+  const BUILD = "et-v31";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -1191,7 +1191,7 @@
           { v: "ambient", l: "Фон — только объём, без входа" }
         ] });
     }
-    fields.push({ key: "hook", label: "Метка автоматизации", value: s.hook || "" });
+    fields.push({ key: "hook", label: "Метки автоматизации", value: s.hook || "" });
     openModal({
       title: "Настроить слот",
       fields,
@@ -1503,8 +1503,12 @@
     return Array.isArray(list) ? list : [];
   }
 
+  function hookList(s) {
+    return String((s && s.hook) || "").toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  }
+
   function applyHookEvent(hook, on, atMs) {
-    const targets = S.slots.filter((s) => s.hook && String(s.hook).toLowerCase() === hook);
+    const targets = S.slots.filter((s) => hookList(s).indexOf(hook) >= 0);
     if (!targets.length) return false;
     const now = Date.now();
     const hrs = Math.max(0, (now - (atMs || now)) / 3600000);
