@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v28";
+  const BUILD = "et-v29";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -38,7 +38,7 @@
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
       },
       checkpoints: [], quests: [], captures: [], sessions: [], interruptions: [],
-      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", cmtSeen: 0, ghToken: "", gistId: "" },
+      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", cmtSeen: -1, ghToken: "", gistId: "" },
       slots: [
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Новостные проверки", trigger: "в течение дня", weight: 8, context: "any", active: true, replaces: null },
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Рилсы в паузах", trigger: "пауза в течение дня", weight: 7, context: "any", active: true, replaces: null },
@@ -1553,7 +1553,7 @@
     try {
       const list = await ghComments();
       if (!list.length) return false;
-      if (!S.sync.cmtSeen) {
+      if (Number(S.sync.cmtSeen) < 0) {
         S.sync.cmtSeen = list.reduce((m2, c) => Math.max(m2, Number(c.id) || 0), 0);
         save({ sync: false });
         return false;
