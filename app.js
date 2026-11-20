@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v27";
+  const BUILD = "et-v28";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -38,7 +38,7 @@
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
       },
       checkpoints: [], quests: [], captures: [], sessions: [], interruptions: [],
-      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", ghToken: "", gistId: "" },
+      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", cmtSeen: 0, ghToken: "", gistId: "" },
       slots: [
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Новостные проверки", trigger: "в течение дня", weight: 8, context: "any", active: true, replaces: null },
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Рилсы в паузах", trigger: "пауза в течение дня", weight: 7, context: "any", active: true, replaces: null },
@@ -1191,6 +1191,7 @@
           { v: "ambient", l: "Фон — только объём, без входа" }
         ] });
     }
+    fields.push({ key: "hook", label: "Метка автоматизации", value: s.hook || "" });
     openModal({
       title: "Настроить слот",
       fields,
@@ -1202,6 +1203,7 @@
             s.trigger = (v.trigger || s.trigger).trim();
             s.weight = clamp(Number(v.weight) || 0, 0, 10);
             if (s.kind === "drain" && (v.mode === "capture" || v.mode === "ambient")) s.mode = v.mode;
+            s.hook = String(v.hook || "").trim().toLowerCase();
             s.updated_at = nowISO();
             save(); closeModal(); render();
           } }
@@ -1483,6 +1485,93 @@
     save({ sync: false });
   }
 
+  let ghCmtEtag = null;
+
+  async function ghComments() {
+    if (!S.sync.gistId) { ghCmtEtag = null; await ghFindGist(); }
+    if (!S.sync.gistId) return [];
+    const h = ghHeaders();
+    if (ghCmtEtag) h["If-None-Match"] = ghCmtEtag;
+    const r = await ghFetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId) + "/comments?per_page=100", { headers: h, cache: "no-store" });
+    if (r.status === 304 || !r.ok) return [];
+    ghCmtEtag = r.headers.get("ETag") || null;
+    const list = await r.json();
+    return Array.isArray(list) ? list : [];
+  }
+
+  function applyHookEvent(hook, on, atMs) {
+    const targets = S.slots.filter((s) => s.hook && String(s.hook).toLowerCase() === hook);
+    if (!targets.length) return false;
+    const now = Date.now();
+    const hrs = Math.max(0, (now - (atMs || now)) / 3600000);
+    let touched = false;
+    for (const s of targets) {
+      if (on === !!s.active) continue;
+      const w = Number(s.weight) || 0;
+      const ratePerH = s.kind === "drain"
+        ? -(S.config.drain_coef * w * drainMult() * slotMult(s.id))
+        : (S.config.stab_coef * w);
+      if (on) {
+        s.active = true; s.updated_at = nowISO();
+        if (!S.runtime.slot_on) S.runtime.slot_on = {};
+        if (!S.runtime.warned) S.runtime.warned = {};
+        S.runtime.slot_on[s.id] = now;
+        S.runtime.warned[s.id] = false;
+        if (s.kind === "drain" && s.mode !== "ambient") chargeEntry();
+        if (hrs > 0.01) {
+          const cur = liveValue();
+          if (cur != null) {
+            S.runtime.battery = round1(clamp(cur + ratePerH * hrs, floorValue(), ceiling()));
+            S.runtime.battery_at = nowISO();
+          }
+        }
+      } else {
+        s.active = false; s.updated_at = nowISO();
+        if (S.runtime.slot_on) delete S.runtime.slot_on[s.id];
+        if (hrs > 0.01) {
+          const cur = liveValue();
+          if (cur != null) {
+            S.runtime.battery = round1(clamp(cur - ratePerH * hrs, floorValue(), ceiling()));
+            S.runtime.battery_at = nowISO();
+          }
+        }
+      }
+      touched = true;
+    }
+    return touched;
+  }
+
+  function handleHook(body, atMs) {
+    const m = String(body || "").trim().toLowerCase().match(/^([a-zа-я0-9_-]+)\s*[: ]\s*(on|off|вкл|выкл)$/);
+    if (!m) return false;
+    const on = m[2] === "on" || m[2] === "вкл";
+    return applyHookEvent(m[1], on, atMs);
+  }
+
+  async function processHooks() {
+    if (!cloudOn() || S.sync.mode === "yandex") return false;
+    try {
+      const list = await ghComments();
+      if (!list.length) return false;
+      if (!S.sync.cmtSeen) {
+        S.sync.cmtSeen = list.reduce((m2, c) => Math.max(m2, Number(c.id) || 0), 0);
+        save({ sync: false });
+        return false;
+      }
+      const seen = Number(S.sync.cmtSeen) || 0;
+      const fresh = list.filter((c) => (Number(c.id) || 0) > seen).sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+      if (!fresh.length) return false;
+      let touched = false;
+      for (const c of fresh) {
+        if (handleHook(c.body, Date.parse(c.created_at || 0) || Date.now())) touched = true;
+      }
+      S.sync.cmtSeen = fresh.reduce((m2, c) => Math.max(m2, Number(c.id) || 0), seen);
+      save({ sync: false });
+      if (touched) { render(); toast("Метка из автоматизации применена"); }
+      return touched;
+    } catch (e) { return false; }
+  }
+
   function noteServerTime(r) {
     try {
       const d = r && r.headers && r.headers.get("Date");
@@ -1573,12 +1662,14 @@
   function autoSync() { return syncOnce(); }
 
   let lastPollAt = 0;
-  function pollCloud() {
+  async function pollCloud() {
     if (modalOpen()) return false;
     const now = Date.now();
     if (document.visibilityState !== "visible" && now - lastPollAt < 4 * 60000) return false;
     lastPollAt = now;
-    return syncOnce();
+    await syncOnce();
+    await processHooks();
+    return true;
   }
 
   function updateSyncHint() {
@@ -1601,6 +1692,7 @@
       "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
       " · проверка облака: " + (S.sync.lastTry ? fmtTime(S.sync.lastTry) : "не было") +
       (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "") +
+      (S.sync.gistId ? "<br>ID хранилища: <b class=\"mono\">" + esc(S.sync.gistId) + "</b>" : "") +
       "<br>Сборка: <b class=\"mono\">" + BUILD + "</b>";
   }
 
@@ -1953,6 +2045,7 @@
   setInterval(updateLive, 1000);
 
   setTimeout(() => { autoSync(); }, 1500);
+  setTimeout(() => { processHooks(); }, 4000);
   setInterval(() => { pollCloud(); }, 10000);
   window.addEventListener("storage", (e) => {
     if (e.key !== KEY || !e.newValue) return;
