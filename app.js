@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v23";
+  const BUILD = "et-v27";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -48,11 +48,11 @@
         { id: uuid(), updated_at: nowISO(), kind: "stab", mode: null, title: "Пустой слот", trigger: "своё", weight: 0, context: "any", active: false, replaces: null }
       ],
       runtime: {
-        base: null, battery: null, battery_at: nowISO(), status: "active",
+        base: null, battery: null, battery_at: nowISO(), cp_at: null, status: "active",
         window_end: null, window_start: null, window_day: null, window_count: 0,
         scout_end: null, scout_start: null, scout_pending: null,
         focus_start: null, last_work_end: null, emergency: false,
-        work: { active: false, started_at: null, weight: 8 },
+        work: { active: false, started_at: null, weight: 8, updated_at: null },
         pause_day: null, pause_count: 0, sleep_override: null,
         drain_start: null, drain_slot: null, pending_entry: false, merged: false,
         residue_until: null, last_entry_at: null,
@@ -806,6 +806,10 @@
   }
 
   function updateLive() {
+    const wc = $("#workClock");
+    if (wc && workActive() && S.runtime.work.started_at) {
+      wc.textContent = hhmm(Date.now() - Date.parse(S.runtime.work.started_at)).slice(0, 5);
+    }
     if (activeTab !== "home") {
       const mc = $("#modeClock");
       if (mc && activeTab === "moment") {
@@ -985,12 +989,12 @@
         break;
       case "work":
         if (!r.work.active) {
-          r.work.active = true; r.work.started_at = nowISO(); save(); render();
+          r.work.active = true; r.work.started_at = nowISO(); r.work.updated_at = nowISO(); save(); render();
           toast("Рабочий день начат · −" + (S.config.drain_coef * (r.work.weight || 0)).toFixed(2) + " пп/ч");
         } else {
           const dur = Math.round((Date.now() - Date.parse(r.work.started_at)) / 60000);
           S.sessions.push({ id: uuid(), updated_at: nowISO(), started_at: r.work.started_at, finished_at: nowISO(), type: "work", duration_min: dur, completed: true });
-          r.work.active = false; r.work.started_at = null; r.last_work_end = nowISO();
+          r.work.active = false; r.work.started_at = null; r.work.updated_at = nowISO(); r.last_work_end = nowISO();
           save(); render(); toast("Рабочий день закончен: " + round1(dur / 60) + " ч");
         }
         break;
@@ -1001,7 +1005,7 @@
           fields: [{ key: "w", label: "Вес", type: "number", value: r.work.weight || 8 }],
           actions: [
             { label: "Отмена", onClick: closeModal },
-            { label: "Сохранить", kind: "primary", onClick: (v) => { r.work.weight = clamp(Number(v.w) || 8, 1, 10); save(); closeModal(); render(); } }
+            { label: "Сохранить", kind: "primary", onClick: (v) => { r.work.weight = clamp(Number(v.w) || 8, 1, 10); r.work.updated_at = nowISO(); save(); closeModal(); render(); } }
           ]
         });
         break;
@@ -1101,6 +1105,7 @@
     S.runtime.base = cp.base_battery;
     S.runtime.battery = cp.base_battery;
     S.runtime.battery_at = nowISO();
+    S.runtime.cp_at = cp.date;
     S.runtime.emergency = false;
     S.runtime.status = S.runtime.window_end ? "cooling" : "active";
     save();
@@ -1118,7 +1123,7 @@
     };
     cp.base_battery = baseFrom(cp);
     S.checkpoints = [cp];
-    S.runtime.base = cp.base_battery; S.runtime.battery = cp.base_battery; S.runtime.battery_at = nowISO();
+    S.runtime.base = cp.base_battery; S.runtime.battery = cp.base_battery; S.runtime.battery_at = nowISO(); S.runtime.cp_at = cp.date;
     save(); render(); toast("Стартовый профиль: " + cp.base_battery + "%");
   }
 
@@ -1298,6 +1303,24 @@
     if (at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0)) {
       out.runtime = Object.assign({}, a.runtime, { base: b.runtime.base, battery: b.runtime.battery, battery_at: b.runtime.battery_at });
     }
+    const wa = at(a.runtime.work && a.runtime.work.updated_at, 0);
+    const wb = at(b.runtime.work && b.runtime.work.updated_at, skew);
+    if (wb > wa) {
+      out.runtime = Object.assign({}, out.runtime, { work: JSON.parse(JSON.stringify(b.runtime.work)) });
+    }
+    const ra = at(a.runtime.last_entry_at, 0);
+    const rb = at(b.runtime.last_entry_at, skew);
+    if (rb > ra) {
+      out.runtime = Object.assign({}, out.runtime, { last_entry_at: b.runtime.last_entry_at, residue_until: b.runtime.residue_until });
+    }
+    const cpsAll = (out.checkpoints || []).slice().sort((x, y) => (String(x.date || "") < String(y.date || "") ? -1 : 1));
+    const cpNew = cpsAll[cpsAll.length - 1];
+    if (cpNew && cpNew.base_battery != null && at(cpNew.date, 0) > at(out.runtime.cp_at, 0)) {
+      out.runtime.base = cpNew.base_battery;
+      out.runtime.battery = cpNew.base_battery;
+      out.runtime.battery_at = cpNew.date;
+      out.runtime.cp_at = cpNew.date;
+    }
     return migrate(out);
   }
 
@@ -1382,8 +1405,21 @@
     };
   }
 
+  async function ghFetch(url, opts) {
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 20000) : null;
+    try {
+      return await fetch(url, Object.assign({}, opts, ctrl ? { signal: ctrl.signal } : {}));
+    } catch (e) {
+      if (e && e.name === "AbortError") throw new Error("GitHub не ответил за 20 секунд");
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function ghCheck() {
-    const r = await fetch(GH_API + "/gists?per_page=1", { headers: ghHeaders() });
+    const r = await ghFetch(GH_API + "/gists?per_page=1", { headers: ghHeaders() });
     if (r.status === 401) throw new Error("токен GitHub не подошёл (401) — скопируйте его целиком");
     if (r.status === 403) throw new Error("токену GitHub не хватает права «gist» (403)");
     if (!r.ok) throw new Error("GitHub ответил " + r.status);
@@ -1391,7 +1427,7 @@
   }
 
   async function ghFindGist() {
-    const r = await fetch(GH_API + "/gists?per_page=100", { headers: ghHeaders(), cache: "no-store" });
+    const r = await ghFetch(GH_API + "/gists?per_page=100", { headers: ghHeaders(), cache: "no-store" });
     if (!r.ok) throw new Error("GitHub ответил " + r.status + " при поиске хранилища");
     const list = await r.json();
     const hit = (Array.isArray(list) ? list : []).filter((g) => g && g.files && g.files[GH_FILE])
@@ -1400,18 +1436,24 @@
     return hit ? hit.id : null;
   }
 
+  let ghEtag = null;
+
   async function ghDownload() {
-    if (!S.sync.gistId) await ghFindGist();
+    if (!S.sync.gistId) { ghEtag = null; await ghFindGist(); }
     if (!S.sync.gistId) return null;
-    const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { headers: ghHeaders(), cache: "no-store" });
+    const h = ghHeaders();
+    if (ghEtag) h["If-None-Match"] = ghEtag;
+    const r = await ghFetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { headers: h, cache: "no-store" });
     noteServerTime(r);
-    if (r.status === 404) { S.sync.gistId = ""; save({ sync: false }); return null; }
+    if (r.status === 304) return null;
+    if (r.status === 404) { S.sync.gistId = ""; ghEtag = null; save({ sync: false }); return null; }
     if (!r.ok) throw new Error("GitHub ответил " + r.status);
+    ghEtag = r.headers.get("ETag") || null;
     const j = await r.json();
     const f = j.files && j.files[GH_FILE];
     if (!f) return null;
     if (f.truncated && f.raw_url) {
-      const raw = await fetch(f.raw_url, { headers: { Authorization: "Bearer " + S.sync.ghToken } });
+      const raw = await ghFetch(f.raw_url, { headers: { Authorization: "Bearer " + S.sync.ghToken } });
       if (!raw.ok) throw new Error("файл не скачался: " + raw.status);
       return await raw.text();
     }
@@ -1426,16 +1468,18 @@
     });
     if (!S.sync.gistId) await ghFindGist();
     if (S.sync.gistId) {
-      const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { method: "PATCH", headers: ghHeaders(), body });
+      const r = await ghFetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { method: "PATCH", headers: ghHeaders(), body });
       noteServerTime(r);
       if (!r.ok) throw new Error("GitHub не принял обновление: " + r.status);
+      ghEtag = null;
       return;
     }
-    const r = await fetch(GH_API + "/gists", { method: "POST", headers: ghHeaders(), body });
+    const r = await ghFetch(GH_API + "/gists", { method: "POST", headers: ghHeaders(), body });
     noteServerTime(r);
     if (!r.ok) throw new Error("GitHub не создал хранилище: " + r.status);
     const j = await r.json();
     S.sync.gistId = j.id;
+    ghEtag = null;
     save({ sync: false });
   }
 
@@ -1453,7 +1497,7 @@
   async function cloudDownload() { return S.sync.ghToken ? ghDownload() : ydDownload(); }
   async function cloudUpload(text) { return S.sync.ghToken ? ghUpload(text) : ydUpload(text); }
 
-  const YD_DEBOUNCE = 6000;
+  const YD_DEBOUNCE = 3000;
   let syncTimer = null, syncBusy = false, syncAgain = false, pushedFp = null;
 
   function modalOpen() {
@@ -1498,8 +1542,12 @@
   async function syncOnce() {
     if (!S.sync || !cloudOn() || !S.sync.auto) return false;
     if (typeof fetch !== "function") return false;
-    if (syncBusy) { syncAgain = true; return false; }
+    if (syncBusy) {
+      const t = Date.parse(S.sync.lastTry || 0) || 0;
+      if (Date.now() - t < 90000) { syncAgain = true; return false; }
+    }
     syncBusy = true;
+    S.sync.lastTry = nowISO();
     try {
       const merged = await mergeRemote();
       if (!merged && stateFingerprint() === pushedFp) { updateSyncHint(); return false; }
@@ -1551,6 +1599,7 @@
       "Токен: " + tokState + "<br>" +
       "Автосинхронизация: " + (!on ? "ждёт токена" : S.sync.auto ? "после каждого изменения" : "выключена") + "<br>" +
       "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
+      " · проверка облака: " + (S.sync.lastTry ? fmtTime(S.sync.lastTry) : "не было") +
       (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "") +
       "<br>Сборка: <b class=\"mono\">" + BUILD + "</b>";
   }
@@ -1904,7 +1953,7 @@
   setInterval(updateLive, 1000);
 
   setTimeout(() => { autoSync(); }, 1500);
-  setInterval(() => { pollCloud(); }, 45000);
+  setInterval(() => { pollCloud(); }, 10000);
   window.addEventListener("storage", (e) => {
     if (e.key !== KEY || !e.newValue) return;
     try {
