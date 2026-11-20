@@ -1447,7 +1447,7 @@
   }
 
   function scheduleSync() {
-    if (!S || !S.sync || !S.sync.token || !S.sync.auto) return;
+    if (!S || !S.sync || !S.sync.auto || !cloudOn()) return;
     if (typeof fetch !== "function") return;
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => { syncTimer = null; autoSync(); }, YD_DEBOUNCE);
@@ -1501,8 +1501,12 @@
 
   function syncHintText() {
     const on = cloudOn();
+    const err = S.sync.lastError || "";
+    const bad = !!err && /\b(401|403)\b/.test(err);
+    const tokState = !on ? "не введён" : bad ? "не принят — нужен новый" : S.sync.lastSync ? "принят" : "не проверен";
     return "Устройство: <b class=\"mono\">" + esc(String(S.meta.device_id).slice(0, 8)) + "</b><br>" +
       "Хранилище: " + (on ? cloudName() : "не подключено") + "<br>" +
+      "Токен: " + tokState + "<br>" +
       "Автосинхронизация: " + (!on ? "ждёт токена" : S.sync.auto ? "после каждого изменения" : "выключена") + "<br>" +
       "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
       (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "");
@@ -1585,7 +1589,8 @@
       toast(mode === "gist" ? "GitHub подключён" : "Диск подключён, папка приложения доступна");
       scheduleSync();
     } catch (e) {
-      closeModal(); render();
+      S.sync.lastError = e.message;
+      save({ sync: false }); closeModal(); render();
       toast("Токен сохранён, но " + e.message);
     }
   }
@@ -1626,7 +1631,7 @@
   }
 
   function openSyncSheet() {
-    const on = !!S.sync.token;
+    const on = cloudOn();
     const acts = [
       { label: on ? "Выгрузить" : "Подключить", onClick: (v) => { applyAuto(v); closeModal(); on ? syncPush() : openConnectSheet(); } },
       { label: "Забрать и слить", onClick: (v) => { applyAuto(v); closeModal(); syncPull(); } }
