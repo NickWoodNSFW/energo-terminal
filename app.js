@@ -37,7 +37,7 @@
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
       },
       checkpoints: [], quests: [], captures: [], sessions: [], interruptions: [],
-      sync: { clientId: "", token: "", lastSync: null, lastDevice: null },
+      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null },
       slots: [
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Новостные проверки", trigger: "в течение дня", weight: 8, context: "any", active: true, replaces: null },
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Рилсы в паузах", trigger: "пауза в течение дня", weight: 7, context: "any", active: true, replaces: null },
@@ -65,6 +65,7 @@
     if (!p || typeof p !== "object" || !p.meta) return d;
     p.config = Object.assign(d.config, p.config || {});
     p.runtime = Object.assign(d.runtime, p.runtime || {});
+    p.sync = Object.assign(d.sync, p.sync || {});
     p.runtime.work = Object.assign({ active: false, started_at: null, weight: 8 }, p.runtime.work || {});
     for (const k of ["checkpoints", "quests", "captures", "sessions", "interruptions", "slots"]) {
       p[k] = Array.isArray(p[k]) ? p[k] : [];
@@ -83,13 +84,40 @@
 
   let S = null;
   let restoredFromLegacy = false;
+  const readErrors = [];
+  let writesBlocked = 0;
+  let persistedFlag = null;
+
+  function countRecords(s) {
+    if (!s) return 0;
+    return (s.checkpoints || []).length + (s.captures || []).length + (s.sessions || []).length +
+      (s.quests || []).length + (s.interruptions || []).length;
+  }
+  function hasData(s) {
+    if (!s) return false;
+    return countRecords(s) > 0 || !!(s.runtime && s.runtime.base != null);
+  }
+  function storedHasData() {
+    for (const k of [KEY, BACKUP_KEY].concat(LEGACY)) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        if (hasData(JSON.parse(raw))) return true;
+      } catch (e) { /* ключ битый — считаем пустым */ }
+    }
+    return false;
+  }
 
   function readKey(k) {
     try {
       const raw = localStorage.getItem(k);
       if (!raw) return null;
       return migrate(JSON.parse(raw));
-    } catch (e) { console.warn("битый ключ " + k, e); return null; }
+    } catch (e) {
+      readErrors.push(k + ": " + (e && e.message ? e.message : "не читается"));
+      console.warn("битый ключ " + k, e);
+      return null;
+    }
   }
 
   function initialState() {
@@ -112,11 +140,18 @@
     return withData.reduce((acc, x) => mergeStates(acc, x.state));
   }
 
-  function save() {
+  function save(opts) {
     try {
+      if (!hasData(S) && storedHasData()) {
+        writesBlocked++;
+        console.warn("защита: пустое состояние не перезаписывает сохранённые данные");
+        if (!opts || opts.sync !== false) scheduleSync();
+        return;
+      }
       localStorage.setItem(KEY, JSON.stringify(S));
       if (S.checkpoints.length > 0) localStorage.setItem(BACKUP_KEY, JSON.stringify(S));
     } catch (e) { toast("Не удалось сохранить: хранилище заполнено"); }
+    if (!opts || opts.sync !== false) scheduleSync();
   }
 
   // ─────────────────────────────── модель ───────────────────────────────
@@ -1206,6 +1241,10 @@
           " · записей " + (p.captures || []).length + " · база " + (p.runtime && p.runtime.base != null ? p.runtime.base + "%" : "нет"));
       } catch (e) { rows.push(k + " — файл повреждён"); }
     }
+    rows.push("");
+    rows.push("запись: " + (writesBlocked ? "заблокирована защитой " + writesBlocked + " раз (пустое состояние не затирает данные)" : "обычная"));
+    rows.push("ошибки чтения: " + (readErrors.length ? "\n  " + readErrors.join("\n  ") : "нет"));
+    rows.push("хранилище закреплено: " + (persistedFlag === null ? "неизвестно" : persistedFlag ? "да" : "нет"));
     return rows.join("\n");
   }
 
@@ -1309,13 +1348,101 @@
     if (!u.ok) throw new Error("загрузка не прошла: " + u.status);
   }
 
+  const YD_DEBOUNCE = 6000;
+  let syncTimer = null, syncBusy = false, syncAgain = false, pushedFp = null;
+
+  function modalOpen() {
+    try { const m = $("#modal"); return !!(m && m.classList.contains("is-open")); } catch (e) { return false; }
+  }
+
+  function stateFingerprint() {
+    return JSON.stringify({
+      c: S.checkpoints, q: S.quests, k: S.captures, s: S.sessions, i: S.interruptions,
+      st: S.slots, cf: S.config, dev: S.meta && S.meta.device_id, cr: S.meta && S.meta.created_at
+    });
+  }
+
+  function scheduleSync() {
+    if (!S || !S.sync || !S.sync.token || !S.sync.auto) return;
+    if (typeof fetch !== "function") return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => { syncTimer = null; autoSync(); }, YD_DEBOUNCE);
+  }
+
+  async function autoSync() {
+    if (!S.sync || !S.sync.token || !S.sync.auto) return;
+    if (typeof fetch !== "function") return;
+    if (syncBusy) { syncAgain = true; return; }
+    if (stateFingerprint() === pushedFp) return;
+    syncBusy = true;
+    try {
+      let merged = false;
+      const txt = await ydDownload();
+      if (txt) {
+        let data = null;
+        try { data = JSON.parse(txt); } catch (e) { data = null; }
+        const foreign = data && data.meta && data.meta.device_id && data.meta.device_id !== S.meta.device_id;
+        const remoteAt = Date.parse((data && data.sync && data.sync.lastSync) || 0) || 0;
+        const localAt = Date.parse(S.sync.lastSync || 0) || 0;
+        if (data && hasData(data) && (!hasData(S) || (foreign && remoteAt > localAt)) && !modalOpen()) {
+          S = mergeStates(S, data);
+          S.sync.lastDevice = data.meta.device_id;
+          merged = true;
+        }
+      }
+      S.sync.lastSync = nowISO();
+      S.sync.lastError = null;
+      save({ sync: false });
+      await ydUpload(JSON.stringify(S));
+      pushedFp = stateFingerprint();
+      if (merged) render();
+      updateSyncHint();
+    } catch (e) {
+      S.sync.lastError = e.message;
+      save({ sync: false });
+      updateSyncHint();
+    } finally {
+      syncBusy = false;
+      if (syncAgain) { syncAgain = false; scheduleSync(); }
+    }
+  }
+
+  function updateSyncHint() {
+    try {
+      const el = $("#syncHint");
+      if (!el) return;
+      el.innerHTML = syncHintText();
+    } catch (e) { /* шторка закрыта */ }
+  }
+
+  function syncHintText() {
+    const on = !!S.sync.token;
+    return "Устройство: <b class=\"mono\">" + esc(String(S.meta.device_id).slice(0, 8)) + "</b><br>" +
+      "Облако: " + (on ? "подключено" : "не подключено") + "<br>" +
+      "Автосинхронизация: " + (!on ? "ждёт токена" : S.sync.auto ? "после каждого изменения" : "выключена") + "<br>" +
+      "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
+      (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "");
+  }
+
   async function syncPush() {
     if (!S.sync.token) { closeModal(); openConnectSheet(); return; }
     toast("Выгружаю…");
     try {
-      await ydUpload(JSON.stringify(S));
+      if (!hasData(S)) {
+        const txt = await ydDownload().catch(() => null);
+        let remote = null;
+        try { remote = txt ? JSON.parse(txt) : null; } catch (e) { remote = null; }
+        if (remote && hasData(remote)) {
+          closeModal();
+          toast("В облаке есть данные, а здесь пусто — нажмите «Забрать и слить»");
+          return;
+        }
+      }
       S.sync.lastSync = nowISO();
-      save(); closeModal(); toast("Выгружено в облако");
+      S.sync.lastError = null;
+      await ydUpload(JSON.stringify(S));
+      pushedFp = stateFingerprint();
+      save({ sync: false }); closeModal(); toast("Выгружено в облако");
     } catch (e) { toast("Ошибка: " + e.message); }
   }
 
@@ -1330,8 +1457,10 @@
       const remoteDevice = data.meta && data.meta.device_id;
       S = mergeStates(S, data);
       S.sync.lastSync = nowISO();
+      S.sync.lastError = null;
       S.sync.lastDevice = remoteDevice || null;
-      save(); closeModal(); render();
+      pushedFp = stateFingerprint();
+      save({ sync: false }); closeModal(); render();
       toast("Слито: чекпоинтов " + before + " → " + S.checkpoints.length + ", записей " + beforeCap + " → " + S.captures.length);
     } catch (e) { toast("Ошибка: " + e.message); }
   }
@@ -1341,10 +1470,14 @@
   }
 
   async function ydCheck() {
-    const r = await fetch(YD_API + "/resources?path=" + encodeURIComponent("app:/"), { headers: ydHeaders() });
-    if (r.status === 401) throw new Error("токен не подошёл (401)");
-    if (r.status === 403) throw new Error("нет права на папку приложения — при регистрации нужно cloud_api:disk.app_folder");
+    const h = ydHeaders();
+    const r = await fetch(YD_API + "/resources?path=" + encodeURIComponent("app:/"), { headers: h });
+    if (r.status === 401) throw new Error("токен не подошёл (401) — скопируйте его со страницы Яндекса целиком");
+    if (r.status === 403) throw new Error("нет права на папку приложения — нужно cloud_api:disk.app_folder");
     if (!r.ok) throw new Error("Диск ответил " + r.status);
+    const w = await fetch(YD_API + "/resources/upload?path=" + encodeURIComponent("app:/probe.json") + "&overwrite=true", { headers: h });
+    if (w.status === 401 || w.status === 403) throw new Error("чтение есть, а записи нет — добавьте cloud_api:disk.read и cloud_api:disk.write и перевыпустите токен");
+    if (!w.ok) throw new Error("Диск не выдал ссылку на запись: " + w.status);
     return true;
   }
 
@@ -1389,24 +1522,32 @@
     });
   }
 
+  function applyAuto(v) {
+    if (!v || !v.auto) return;
+    const next = v.auto === "on";
+    if (next === S.sync.auto) return;
+    S.sync.auto = next;
+    save({ sync: false });
+    if (next) { pushedFp = null; scheduleSync(); }
+  }
+
   function openSyncSheet() {
     const on = !!S.sync.token;
+    const acts = [
+      { label: on ? "Выгрузить" : "Подключить", onClick: (v) => { applyAuto(v); closeModal(); on ? syncPush() : openConnectSheet(); } },
+      { label: "Забрать и слить", onClick: (v) => { applyAuto(v); closeModal(); syncPull(); } }
+    ];
+    if (on) acts.push({ label: "Токен", onClick: (v) => { applyAuto(v); closeModal(); openConnectSheet(); } });
+    acts.push({ label: "Закрыть", kind: "primary", onClick: (v) => { applyAuto(v); closeModal(); } });
     openModal({
       title: "Синхронизация",
-      html: "<p>Оба устройства пишут один файл в облако. При слиянии записи сравниваются по id и времени изменения: побеждает более свежая, новые добавляются.</p>" +
-        '<div class="hint"><span class="bar"></span><span>' +
-        "Устройство: <b class=\"mono\">" + esc(String(S.meta.device_id).slice(0, 8)) + "</b><br>" +
-        "Облако: " + (on ? "подключено" : "не подключено") + "<br>" +
-        "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
-        "</span></div>" +
+      html: "<p>Оба устройства пишут один файл в облако. Изменения уходят сами через несколько секунд, а перед записью приложение сверяет облако и, если там свежее, сначала сливает его.</p>" +
+        '<div class="hint"><span class="bar"></span><span id="syncHint">' + syncHintText() + "</span></div>" +
         (on ? "" : '<p class="note">Без облака перенос делается файлом: «Данные» → экспорт → импорт со слиянием.</p>'),
-      actions: [
-        { label: on ? "Выгрузить" : "Подключить", onClick: () => { closeModal(); on ? syncPush() : openConnectSheet(); } },
-        { label: "Забрать и слить", onClick: () => { closeModal(); syncPull(); } },
-        on ? { label: "Токен", onClick: () => { closeModal(); openConnectSheet(); } }
-           : { label: "Закрыть", kind: "primary", onClick: closeModal },
-        on ? { label: "Закрыть", kind: "primary", onClick: closeModal } : { label: "Файлом", onClick: () => { closeModal(); act("export"); } }
-      ]
+      fields: on ? [{ key: "auto", label: "Автосинхронизация", type: "select",
+        value: S.sync.auto ? "on" : "off",
+        options: [{ v: "on", l: "включена — после каждого изменения" }, { v: "off", l: "выключена — только вручную" }] }] : [],
+      actions: acts
     });
   }
 
@@ -1620,6 +1761,26 @@
   setInterval(() => { accrue(); if (tick()) render(); }, 30000);
   setInterval(updateLive, 1000);
 
+  setTimeout(() => { autoSync(); }, 1500);
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY || !e.newValue) return;
+    try {
+      const other = migrate(JSON.parse(e.newValue));
+      if (countRecords(other) > countRecords(S)) {
+        S = other;
+        render();
+        toast("Подхвачены данные из другой вкладки");
+      }
+    } catch (err) { /* чужая запись не читается — не трогаем своё состояние */ }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; autoSync(); }
+    } else {
+      autoSync();
+    }
+  });
+
   if (startupError) {
     const msg = (startupError && startupError.stack) || String(startupError);
     const v = $("#view");
@@ -1641,6 +1802,26 @@
   } else if (restoredFromLegacy) {
     toast("Данные восстановлены: " + S.checkpoints.length + " чекпоинтов");
   }
+
+  if (readErrors.length) {
+    openModal({
+      title: "Данные не прочитались",
+      html: "<p>Часть сохранённых данных не читается, поэтому приложение открылось с пустым состоянием. Записывать поверх них оно не будет — защита уже сработала.</p>" +
+        "<pre class=\"mono\" style=\"white-space:pre-wrap;font-size:12px;color:#f3bab5;margin:0;max-height:30vh;overflow:auto\">" +
+        esc(readErrors.join("\n")) + "</pre>",
+      actions: [
+        { label: "Диагностика", onClick: () => { closeModal(); showDiag(); } },
+        { label: "Понятно", kind: "primary", onClick: closeModal }
+      ]
+    });
+  }
+
+  try {
+    if (navigator.storage && navigator.storage.persisted) {
+      navigator.storage.persisted().then((v) => { persistedFlag = v; }).catch(() => {});
+      if (navigator.storage.persist) navigator.storage.persist().then((v) => { if (v) persistedFlag = true; }).catch(() => {});
+    }
+  } catch (e) { /* нет Storage API */ }
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
