@@ -1335,9 +1335,23 @@
     if (r.status === 404) return null;
     if (!r.ok) throw new Error("Диск ответил " + r.status);
     const j = await r.json();
-    const f = await fetch(j.href);
-    if (!f.ok) throw new Error("файл не скачался: " + f.status);
-    return f.text();
+    const urls = [j.href];
+    try {
+      const u = new URL(j.href);
+      if (u.searchParams.has("direct_zip_experiment")) {
+        u.searchParams.delete("direct_zip_experiment");
+        urls.push(u.toString());
+      }
+    } catch (e) { /* ссылка нестандартная — пробуем как есть */ }
+    let lastErr = null;
+    for (const u of urls) {
+      try {
+        const f = await fetch(u);
+        if (!f.ok) throw new Error("файл не скачался: " + f.status);
+        return await f.text();
+      } catch (e) { lastErr = e; }
+    }
+    throw new Error("не удалось скачать файл: " + (lastErr && lastErr.message ? lastErr.message : "сеть"));
   }
 
   async function ydUpload(text) {

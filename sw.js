@@ -1,4 +1,4 @@
-const CACHE = "et-v13";
+const CACHE = "et-v14";
 const SHELL = [
   "./",
   "./index.html",
@@ -25,6 +25,9 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
+  let url;
+  try { url = new URL(req.url); } catch (err) { return; }
+  if (url.origin !== self.location.origin) return;
   e.respondWith(
     caches.match(req).then((hit) => {
       if (hit) return hit;
@@ -32,7 +35,11 @@ self.addEventListener("fetch", (e) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         return res;
-      }).catch(() => caches.match("./index.html"));
+      }).catch(() =>
+        caches.match("./index.html").then((r) => r || new Response("Нет сети, а оболочка не сохранена", {
+          status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" }
+        }))
+      );
     })
   );
 });
