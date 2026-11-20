@@ -15,6 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
+  const BUILD = "et-v20";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -1245,6 +1246,7 @@
     rows.push("запись: " + (writesBlocked ? "заблокирована защитой " + writesBlocked + " раз (пустое состояние не затирает данные)" : "обычная"));
     rows.push("ошибки чтения: " + (readErrors.length ? "\n  " + readErrors.join("\n  ") : "нет"));
     rows.push("хранилище закреплено: " + (persistedFlag === null ? "неизвестно" : persistedFlag ? "да" : "нет"));
+    rows.push("сборка: " + BUILD);
     return rows.join("\n");
   }
 
@@ -1515,7 +1517,8 @@
       "Токен: " + tokState + "<br>" +
       "Автосинхронизация: " + (!on ? "ждёт токена" : S.sync.auto ? "после каждого изменения" : "выключена") + "<br>" +
       "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
-      (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "");
+      (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "") +
+      "<br>Сборка: <b class=\"mono\">" + BUILD + "</b>";
   }
 
   async function syncPush() {

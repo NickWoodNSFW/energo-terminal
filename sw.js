@@ -1,4 +1,4 @@
-const CACHE = "et-v19";
+const CACHE = "et-v20";
 const SHELL = [
   "./",
   "./index.html",
@@ -11,7 +11,12 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(SHELL.map((u) =>
+        fetch(u, { cache: "reload" }).then((r) => c.put(u, r)).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
@@ -29,17 +34,16 @@ self.addEventListener("fetch", (e) => {
   try { url = new URL(req.url); } catch (err) { return; }
   if (url.origin !== self.location.origin) return;
   e.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
+    fetch(req).then((res) => {
+      if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        return res;
-      }).catch(() =>
-        caches.match("./index.html").then((r) => r || new Response("Нет сети, а оболочка не сохранена", {
-          status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" }
-        }))
-      );
-    })
+      }
+      return res;
+    }).catch(() =>
+      caches.match(req).then((hit) => hit || caches.match("./index.html")).then((r) => r || new Response("Нет сети, а оболочка не сохранена", {
+        status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" }
+      }))
+    )
   );
 });
