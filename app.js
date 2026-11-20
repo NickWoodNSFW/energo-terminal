@@ -37,7 +37,7 @@
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
       },
       checkpoints: [], quests: [], captures: [], sessions: [], interruptions: [],
-      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null },
+      sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", ghToken: "", gistId: "" },
       slots: [
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Новостные проверки", trigger: "в течение дня", weight: 8, context: "any", active: true, replaces: null },
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Рилсы в паузах", trigger: "пауза в течение дня", weight: 7, context: "any", active: true, replaces: null },
@@ -1362,6 +1362,76 @@
     if (!u.ok) throw new Error("загрузка не прошла: " + u.status);
   }
 
+  const GH_API = "https://api.github.com";
+  const GH_FILE = "energo-terminal.json";
+
+  function ghHeaders() {
+    return {
+      Authorization: "Bearer " + S.sync.ghToken,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json"
+    };
+  }
+
+  async function ghCheck() {
+    const r = await fetch(GH_API + "/gists?per_page=1", { headers: ghHeaders() });
+    if (r.status === 401) throw new Error("токен GitHub не подошёл (401) — скопируйте его целиком");
+    if (r.status === 403) throw new Error("токену GitHub не хватает права «gist» (403)");
+    if (!r.ok) throw new Error("GitHub ответил " + r.status);
+    return true;
+  }
+
+  async function ghFindGist() {
+    const r = await fetch(GH_API + "/gists?per_page=100", { headers: ghHeaders() });
+    if (!r.ok) throw new Error("GitHub ответил " + r.status + " при поиске хранилища");
+    const list = await r.json();
+    const hit = (Array.isArray(list) ? list : []).filter((g) => g && g.files && g.files[GH_FILE])
+      .sort((a, b) => Date.parse(b.updated_at || 0) - Date.parse(a.updated_at || 0))[0];
+    if (hit) { S.sync.gistId = hit.id; save({ sync: false }); }
+    return hit ? hit.id : null;
+  }
+
+  async function ghDownload() {
+    if (!S.sync.gistId) await ghFindGist();
+    if (!S.sync.gistId) return null;
+    const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { headers: ghHeaders() });
+    if (r.status === 404) { S.sync.gistId = ""; save({ sync: false }); return null; }
+    if (!r.ok) throw new Error("GitHub ответил " + r.status);
+    const j = await r.json();
+    const f = j.files && j.files[GH_FILE];
+    if (!f) return null;
+    if (f.truncated && f.raw_url) {
+      const raw = await fetch(f.raw_url, { headers: { Authorization: "Bearer " + S.sync.ghToken } });
+      if (!raw.ok) throw new Error("файл не скачался: " + raw.status);
+      return await raw.text();
+    }
+    return f.content;
+  }
+
+  async function ghUpload(text) {
+    const body = JSON.stringify({
+      description: "Энерго-Терминал — состояние приложения",
+      public: false,
+      files: { [GH_FILE]: { content: text } }
+    });
+    if (!S.sync.gistId) await ghFindGist();
+    if (S.sync.gistId) {
+      const r = await fetch(GH_API + "/gists/" + encodeURIComponent(S.sync.gistId), { method: "PATCH", headers: ghHeaders(), body });
+      if (!r.ok) throw new Error("GitHub не принял обновление: " + r.status);
+      return;
+    }
+    const r = await fetch(GH_API + "/gists", { method: "POST", headers: ghHeaders(), body });
+    if (!r.ok) throw new Error("GitHub не создал хранилище: " + r.status);
+    const j = await r.json();
+    S.sync.gistId = j.id;
+    save({ sync: false });
+  }
+
+  function cloudOn() { return !!(S.sync.ghToken || S.sync.token); }
+  function cloudName() { return S.sync.ghToken ? "GitHub" : "Яндекс.Диск"; }
+  async function cloudDownload() { return S.sync.ghToken ? ghDownload() : ydDownload(); }
+  async function cloudUpload(text) { return S.sync.ghToken ? ghUpload(text) : ydUpload(text); }
+
   const YD_DEBOUNCE = 6000;
   let syncTimer = null, syncBusy = false, syncAgain = false, pushedFp = null;
 
@@ -1384,14 +1454,14 @@
   }
 
   async function autoSync() {
-    if (!S.sync || !S.sync.token || !S.sync.auto) return;
+    if (!S.sync || !cloudOn() || !S.sync.auto) return;
     if (typeof fetch !== "function") return;
     if (syncBusy) { syncAgain = true; return; }
     if (stateFingerprint() === pushedFp) return;
     syncBusy = true;
     try {
       let merged = false;
-      const txt = await ydDownload();
+      const txt = await cloudDownload();
       if (txt) {
         let data = null;
         try { data = JSON.parse(txt); } catch (e) { data = null; }
@@ -1407,7 +1477,7 @@
       S.sync.lastSync = nowISO();
       S.sync.lastError = null;
       save({ sync: false });
-      await ydUpload(JSON.stringify(S));
+      await cloudUpload(JSON.stringify(S));
       pushedFp = stateFingerprint();
       if (merged) render();
       updateSyncHint();
@@ -1430,20 +1500,20 @@
   }
 
   function syncHintText() {
-    const on = !!S.sync.token;
+    const on = cloudOn();
     return "Устройство: <b class=\"mono\">" + esc(String(S.meta.device_id).slice(0, 8)) + "</b><br>" +
-      "Облако: " + (on ? "подключено" : "не подключено") + "<br>" +
+      "Хранилище: " + (on ? cloudName() : "не подключено") + "<br>" +
       "Автосинхронизация: " + (!on ? "ждёт токена" : S.sync.auto ? "после каждого изменения" : "выключена") + "<br>" +
       "Последняя синхронизация: " + (S.sync.lastSync ? fmtDate(S.sync.lastSync) + " " + fmtTime(S.sync.lastSync) : "не было") +
       (S.sync.lastError ? "<br>Последняя ошибка: " + esc(S.sync.lastError) : "");
   }
 
   async function syncPush() {
-    if (!S.sync.token) { closeModal(); openConnectSheet(); return; }
+    if (!cloudOn()) { closeModal(); openConnectSheet(); return; }
     toast("Выгружаю…");
     try {
       if (!hasData(S)) {
-        const txt = await ydDownload().catch(() => null);
+        const txt = await cloudDownload().catch(() => null);
         let remote = null;
         try { remote = txt ? JSON.parse(txt) : null; } catch (e) { remote = null; }
         if (remote && hasData(remote)) {
@@ -1454,17 +1524,17 @@
       }
       S.sync.lastSync = nowISO();
       S.sync.lastError = null;
-      await ydUpload(JSON.stringify(S));
+      await cloudUpload(JSON.stringify(S));
       pushedFp = stateFingerprint();
       save({ sync: false }); closeModal(); toast("Выгружено в облако");
     } catch (e) { toast("Ошибка: " + e.message); }
   }
 
   async function syncPull() {
-    if (!S.sync.token) { closeModal(); openConnectSheet(); return; }
+    if (!cloudOn()) { closeModal(); openConnectSheet(); return; }
     toast("Забираю…");
     try {
-      const txt = await ydDownload();
+      const txt = await cloudDownload();
       if (txt == null) { toast("В облаке пока пусто — сначала выгрузите с другого устройства"); return; }
       const data = JSON.parse(txt);
       const before = S.checkpoints.length, beforeCap = S.captures.length;
@@ -1495,14 +1565,23 @@
     return true;
   }
 
-  async function adoptToken(raw) {
-    const tk = cleanToken(raw);
-    if (!tk) { toast("Вставьте токен со страницы Яндекса"); return; }
-    S.sync.token = tk; save();
+  async function adoptCloud(v) {
+    const mode = v && v.mode === "yandex" ? "yandex" : "gist";
+    const tk = cleanToken(v && v.tok);
+    S.sync.clientId = ((v && v.cid) || "").trim();
+    if (!tk) { save({ sync: false }); toast(mode === "gist" ? "Вставьте токен GitHub с правом gist" : "Вставьте access_token Яндекса"); return; }
+    S.sync.mode = mode;
+    if (mode === "gist") { S.sync.ghToken = tk; S.sync.token = ""; }
+    else { S.sync.token = tk; S.sync.ghToken = ""; }
+    save({ sync: false });
     try {
-      await ydCheck();
-      S.sync.lastSync = nowISO(); save(); closeModal(); render();
-      toast("Диск подключён, папка приложения доступна");
+      if (mode === "gist") await ghCheck(); else await ydCheck();
+      S.sync.lastSync = nowISO();
+      S.sync.lastError = null;
+      pushedFp = null;
+      save({ sync: false }); closeModal(); render();
+      toast(mode === "gist" ? "GitHub подключён" : "Диск подключён, папка приложения доступна");
+      scheduleSync();
     } catch (e) {
       closeModal(); render();
       toast("Токен сохранён, но " + e.message);
@@ -1510,28 +1589,27 @@
   }
 
   function openConnectSheet() {
+    const mode = S.sync.ghToken ? "gist" : (S.sync.token ? "yandex" : "gist");
     openModal({
-      title: "Подключить Яндекс.Диск",
-      html: "<p>Приложение пишет один файл в свою папку на Диске. Доступ к остальному не нужно, токен остаётся на этом устройстве.</p>" +
-        "<p class=\"note\">1. На oauth.yandex.ru создайте приложение и отметьте право <b>cloud_api:disk.app_folder</b>.<br>" +
-        "2. Впишите client_id ниже и нажмите «Открыть авторизацию».<br>" +
-        "3. Яндекс покажет access_token — скопируйте его и вставьте во второе поле.</p>",
+      title: "Подключить хранилище",
+      html: "<p>Приложение хранит одно состояние в облаке. Токен остаётся на этом устройстве.</p>" +
+        "<p class=\"note\"><b>GitHub Gist</b> (рекомендуется): на github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) создайте токен с одной галочкой <b>gist</b>, скопируйте его в поле «Токен». Хранилище создастся само и будет приватным.<br>" +
+        "<b>Яндекс.Диск</b>: годится только для выгрузки, читать файл из браузера Яндекс не разрешает.</p>",
       fields: [
-        { key: "cid", label: "client_id", value: S.sync.clientId || "" },
-        { key: "tok", label: "access_token", value: "" }
+        { key: "mode", label: "Хранилище", type: "select", value: mode,
+          options: [{ v: "gist", l: "GitHub Gist — чтение и запись" }, { v: "yandex", l: "Яндекс.Диск — только выгрузка" }] },
+        { key: "tok", label: "Токен", value: "" },
+        { key: "cid", label: "client_id (только для Яндекса)", value: S.sync.clientId || "" }
       ],
       actions: [
         { label: "Отмена", onClick: closeModal },
         { label: "Открыть авторизацию", onClick: (v) => {
             const cid = (v.cid || "").trim();
             if (!cid) { toast("Нужен client_id"); return; }
-            S.sync.clientId = cid; save();
+            S.sync.clientId = cid; save({ sync: false });
             location.href = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + encodeURIComponent(cid);
           } },
-        { label: "Сохранить токен", kind: "primary", onClick: (v) => {
-            S.sync.clientId = (v.cid || "").trim(); save();
-            adoptToken(v.tok);
-          } }
+        { label: "Сохранить", kind: "primary", onClick: (v) => { adoptCloud(v); } }
       ]
     });
   }
