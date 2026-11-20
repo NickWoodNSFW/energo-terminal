@@ -27,7 +27,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v35";
+  const BUILD = "et-v38";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -242,15 +242,21 @@
       pts.push(x.toFixed(1) + "," + y.toFixed(1));
     }
     const nx = formMarkerX(Date.now()).toFixed(1);
-    return '<section class="card card--tight">' +
+    const ny = (FORM_H - formNow() * FORM_H).toFixed(1);
+    const ticks = [10, 14, 18, 22].map((h) =>
+      '<span style="left:' + (((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 100).toFixed(2) + '%">' + h + ":00</span>").join("");
+    return '<section class="card card--ink">' +
       '<div class="between"><h2 style="margin:0">Форма дня</h2>' +
         '<span class="chip mono"><b id="formVal">' + Math.round(formNow() * 100) + '%</b> · ×<span id="formMul">' + formMult().toFixed(2) + "</span></span></div>" +
       '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус усталость. Чем ниже форма, тем дороже то же залипание — вечером расход выше, чем утром.</p>' +
-      '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="' + FORM_H + '" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
-        '<polyline points="' + pts.join(" ") + '" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linejoin="round" />' +
-        '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="var(--teal)" stroke-width="1.5" />' +
+      '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="72" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
+        '<polyline points="' + pts.join(" ") + " 240," + FORM_H + " 0," + FORM_H + '" style="fill:rgba(22,19,31,.10);stroke:none" />' +
+        '<polyline points="' + pts.join(" ") + '" fill="none" stroke="rgba(22,19,31,.55)" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />' +
+        '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="#16131f" stroke-width="1" stroke-opacity=".5" />' +
+        '<circle id="formDot" cx="' + nx + '" cy="' + ny + '" r="3" fill="#16131f" />' +
       "</svg>" +
-      '<p class="note" style="margin-top:8px">Спад после обеда и к вечеру — часть ритма, а не сбой. Кривая калибровочная.</p>' +
+      '<div class="ink-axis">' + ticks + "</div>" +
+      '<p class="note" style="margin-top:6px">Спад после обеда и к вечеру — часть ритма, а не сбой. Кривая калибровочная.</p>' +
       "</section>";
   }
 
@@ -366,6 +372,16 @@
   }
 
   // ─────────────────────────────── тост и шторки ───────────────────────────────
+  function plural(n, forms) {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return forms[2];
+    if (b > 1 && b < 5) return forms[1];
+    if (b === 1) return forms[0];
+    return forms[2];
+  }
+  const CP = ["чекпоинт", "чекпоинта", "чекпоинтов"];
+  const CAP = ["запись", "записи", "записей"];
+
   let toastT = null;
   function toast(msg) {
     const el = $("#toast");
@@ -474,6 +490,10 @@
     const sign = delta > 0.004 ? "+" : delta < -0.004 ? "−" : "±";
     return '<div class="spark" id="sparkBox">' +
       '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<line x1="0" x2="' + W + '" y1="' + (H * .25) + '" y2="' + (H * .25) + '" stroke="currentColor" stroke-opacity=".1" vector-effect="non-scaling-stroke"/>' +
+        '<line x1="0" x2="' + W + '" y1="' + (H * .5) + '" y2="' + (H * .5) + '" stroke="currentColor" stroke-opacity=".1" vector-effect="non-scaling-stroke"/>' +
+        '<line x1="0" x2="' + W + '" y1="' + (H * .75) + '" y2="' + (H * .75) + '" stroke="currentColor" stroke-opacity=".1" vector-effect="non-scaling-stroke"/>' +
+        '<path d="' + path + " L" + px(last.t).toFixed(1) + " " + (H - pad) + " L" + px(win[0].t).toFixed(1) + " " + (H - pad) + ' Z" fill="currentColor" opacity=".14"/>' +
         '<path d="' + path + '" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>' +
         '<circle cx="' + px(last.t).toFixed(1) + '" cy="' + py(last.v).toFixed(1) + '" r="2.5" fill="currentColor"/>' +
       "</svg>" +
@@ -485,7 +505,8 @@
     const v = liveValue();
     if (v == null) {
       return '<section class="card hero"><div class="hero-top"><div>' +
-        '<div class="hero-num hero-num--empty">—</div>' +
+        '<div class="label">заряд</div>' +
+        '<div class="hero-num hero-num--empty">—<span>%</span></div>' +
         '<div class="hero-sub">Заряд считается от последней точки сохранения</div></div>' +
         '<span class="badge badge--flat"><span class="dot"></span>база не задана</span></div>' +
         '<div class="divider"></div>' +
@@ -502,6 +523,7 @@
     }).join("");
     return '<section class="card hero" style="--lvl:' + lv.c1 + ';--lvl-2:' + lv.c2 + '">' +
       '<div class="hero-top"><div>' +
+        '<div class="label">заряд</div>' +
         '<div class="hero-num" id="heroVal">' + v.toFixed(2) + "<span>%</span></div>" +
         '<div class="hero-sub" id="heroSpent">потрачено ' + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " пп</div>" +
       "</div><div id=\"heroBadge\">" + statusBadge(v) + "</div></div>" +
@@ -510,6 +532,7 @@
         '<div class="bat-ceil" id="batCeil" style="left:' + clamp(ceil, 0, 100).toFixed(1) + '%"></div></div>' +
         '<div class="bat-nub"></div>' +
       "</div>" +
+      '<div class="bars-axis"><span>0 %</span><b style="left:' + clamp(v, 0, 100).toFixed(1) + '%">сейчас</b><span>100 %</span></div>' +
       '<div class="legend">' +
         '<span><i class="lg lg--deep"></i>останется к вечеру</span>' +
         '<span><i class="lg lg--wane"></i>уйдёт</span>' +
@@ -523,10 +546,26 @@
     "</section>" + formCard();
   }
 
+  function duoBlock() {
+    const v = liveValue();
+    const has = v != null;
+    const proj = has ? projection() : 0;
+    const ep = hoursToEvening();
+    return '<div class="duo">' +
+      '<section class="card"><div class="label">к вечеру</div>' +
+        '<div class="big ' + (has ? "big--lime" : "big--mute") + '">' + (has ? proj.toFixed(1) : "—") + '<small>%</small></div>' +
+        '<div class="note">' + (has ? ep.label.toLowerCase() : "нет базы") + "</div></section>" +
+      '<section class="card"><div class="label">форма</div>' +
+        '<div class="big">' + Math.round(formNow() * 100) + '<small>%</small></div>' +
+        '<div class="note">расход x' + formMult().toFixed(2) + "</div></section>" +
+    "</div>";
+  }
+
   function protocolsRow() {
+
     const r = S.runtime;
     const pausesLeft = Math.max(0, S.config.micro_pause_limit - (r.pause_day === todayKey() ? (r.pause_count || 0) : 0));
-    return '<section class="card card--tight"><h2>Протоколы</h2><div class="protocols">' +
+    return '<section class="card card--tight"><div class="label" style="margin-bottom:var(--s2)">протоколы</div><div class="protocols">' +
       '<button type="button" class="pill" data-act="scout"' + (r.scout_end ? " disabled" : "") + ">" +
         "<span>" + icon("bolt", 15) + " " + (r.scout_end ? "Разведка · " + hhmm(r.scout_end - Date.now()) : "Разведка 5 мин") + "</span>" +
         '<span class="pill-meta">туман</span></button>' +
@@ -542,7 +581,7 @@
   function workCard() {
     const w = S.runtime.work;
     const wRate = -S.config.drain_coef * (Number(w.weight) || 0);
-    return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день и дорога</h2>' +
+    return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день</h2>' +
       '<span class="chip">вес ' + w.weight + " · " + wRate.toFixed(2) + "</span></div>" +
       (w.active
         ? '<div class="switch-big"><div><div class="timer" id="workClock">' + hhmm(Date.now() - Date.parse(w.started_at)).slice(0, 5) + "</div>" +
@@ -627,7 +666,7 @@
 
   function renderHome() {
     const r = S.runtime;
-    let h = heroBlock() + protocolsRow() + workCard() + slotsBlock() + switchRow();
+    let h = heroBlock() + duoBlock() + protocolsRow() + workCard() + slotsBlock() + switchRow();
     if (r.scout_pending) {
       h += '<section class="card"><h2>Разведка завершена</h2><p class="dim">Продолжили работу после сигнала?</p>' +
         '<div class="row"><button type="button" class="primary" data-scout="yes">Продолжил</button>' +
@@ -668,68 +707,88 @@
 
   function avgFocus() {
     const wk = S.sessions.filter((s) => s.type === "focus" && Date.now() - Date.parse(s.started_at) < 7 * 864e5);
-    if (!wk.length) return "—";
+    if (!wk.length) return "— нет замеров";
     return Math.round(wk.reduce((a, s) => a + s.duration_min, 0) / wk.length) + " мин · " + wk.length + " подх.";
+  }
+
+  function clockHTML(t, live) {
+    const p = String(t).split(":");
+    return '<div class="clock' + (live ? " is-live" : "") + '">' +
+      '<span class="clock-mm">' + (p[0] || "00") + '</span><span class="clock-ss">:' + (p[1] || "00") + "</span></div>";
   }
 
   function renderMoment() {
     const r = S.runtime;
     const modes = [["scout", "Разведка"], ["focus", "Фокус"], ["window", "Окно"]];
-    let timer = "05:00", actionLabel = "Запустить разведку", actName = "scout", hint = "Снять туман с одного квадрата. Через 5 минут можно бросить без стыда.";
+    let timer = "05:00", live = false, unit = "осталось", actionLabel = "Запустить разведку", actName = "scout",
+      hint = "Снять туман с одного квадрата. Через 5 минут можно бросить без стыда.";
 
     if (momentMode === "scout") {
       timer = r.scout_end ? hhmm(r.scout_end - Date.now()) : "05:00";
+      live = !!r.scout_end;
       if (r.scout_end) { actionLabel = "Разведка идёт"; }
     } else if (momentMode === "focus") {
       timer = r.focus_start ? hhmm(Date.now() - r.focus_start) : "00:00";
+      live = !!r.focus_start;
+      unit = "уже идёт";
       actionLabel = r.focus_start ? "Завершить подход" : "Запустить секундомер";
       actName = "focus";
       hint = "Секундомер вверх. Показывает реальную ёмкость внимания, а не норматив.";
     } else {
       timer = r.window_end ? hhmm(r.window_end - Date.now()) : "45:00";
+      live = !!r.window_end;
       actionLabel = r.window_end ? "Окно открыто" : "Открыть окно 45 мин";
       actName = "window";
       hint = "Разрешённый отдых. Начисление остановлено целиком: ни расхода, ни восстановления.";
     }
 
     return '<div class="stack">' +
-      '<section class="card"><div class="seg" role="group" aria-label="Режим таймера">' +
-        modes.map(([k, l]) => '<button type="button" data-mode="' + k + '" aria-pressed="' + (momentMode === k) + '">' + l + "</button>").join("") +
-      "</div>" +
-      '<div class="timer' + (timer === "00:00" || timer === "05:00" || timer === "45:00" ? " timer--idle" : "") + '" id="modeClock">' + timer + "</div>" +
-      '<p class="note">' + hint + "</p>" +
-      '<div class="row" style="margin-top:var(--s3)"><button type="button" class="primary" data-act="' + actName + '"' +
-        ((actName === "scout" && r.scout_end) || (actName === "window" && r.window_end) ? " disabled" : "") + ">" + actionLabel + "</button></div>" +
-      '<div class="divider"></div><p class="note">Средняя ёмкость за 7 дней: <b class="mono">' + avgFocus() + "</b></p></section>" +
-      '<section class="card"><h2>Журнал дня</h2>' + timeline() + "</section></div>";
+      '<section class="card">' +
+        '<div class="tabs-text" role="group" aria-label="Режим таймера">' +
+          modes.map(([k, l]) => '<button type="button" data-mode="' + k + '" aria-pressed="' + (momentMode === k) + '">' + l + "</button>").join("") +
+        "</div>" +
+        '<div class="label">' + unit + "</div>" +
+        '<div id="modeClock">' + clockHTML(timer, live) + "</div>" +
+        '<p class="note" style="margin-top:var(--s3)">' + hint + "</p>" +
+        '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-act="' + actName + '"' +
+          ((actName === "scout" && r.scout_end) || (actName === "window" && r.window_end) ? " disabled" : "") + ">" + actionLabel + "</button></div>" +
+        '<div class="sleepline"><span>ёмкость внимания за неделю <b class="mono">' + avgFocus() + "</b></span></div>" +
+      "</section>" +
+      '<section class="card"><div class="between"><h2 style="margin:0">Журнал дня</h2>' +
+        '<span class="chip">' + timelineEvents().length + " соб.</span></div>" + timeline() + "</section></div>";
   }
 
   function renderCapture() {
     const items = S.captures.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-    return '<section class="card"><h2>Захват</h2>' +
-      '<p class="dim">Внешняя память. Выгрузили — и держать в голове не нужно.</p>' +
+    const done = items.filter((c) => c.done_at).length;
+    return '<div class="stack">' +
+      '<section class="card"><div class="label">внешняя память</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Захват</h2>' +
+      '<p class="note">Выгрузили — и держать в голове не нужно.</p>' +
       '<label for="capText">Что нужно не забыть</label>' +
       '<textarea id="capText" placeholder="Любая мысль или дело, без сроков и оценок"></textarea>' +
       '<div class="row" style="margin-top:var(--s3)"><button type="button" class="primary" data-act="capture">Выгрузить из головы</button></div></section>' +
-      '<section class="card"><div class="between"><h2 style="margin:0">Записей: ' + items.length + "</h2>" +
-      '<button type="button" class="ghost sm" data-act="capClear">Очистить отработанные</button></div>' +
-      '<div style="margin-top:var(--s2)">' + (items.length
+      '<section class="card"><div class="between"><div><div class="label">в списке</div>' +
+      '<div class="big">' + items.length + "<small>зап.</small></div></div>" +
+      (done ? '<button type="button" class="link" data-act="capClear">Убрать отработанные</button>' : "") + "</div>" +
+      '<div style="margin-top:var(--s3)">' + (items.length
         ? items.map((c) => '<div class="item"><div class="between">' +
             '<span' + (c.done_at ? ' style="text-decoration:line-through;color:var(--mute)"' : "") + ">" + esc(c.text) + "</span>" +
             '<button type="button" class="ghost sm" data-capdone="' + c.id + '">' + (c.done_at ? "Вернуть" : "Сброшено") + "</button></div>" +
             '<div class="d">' + fmtDate(c.created_at) + " " + fmtTime(c.created_at) + "</div></div>").join("")
-        : '<p class="note">Пока пусто. Одно касание кнопки «+» — и мысль выгружена.</p>') + "</div></section>";
+        : '<p class="note">Пока пусто. Одно касание кнопки «+» — и мысль выгружена.</p>') + "</div></section></div>";
   }
 
-  function slider(group, key, label, val, prev, stepText, hint) {
+  function slider(group, key, label, val, prev, hint) {
     const id = group + "-" + key;
     const d = prev == null ? null : val - prev;
-    const dtxt = d == null ? "" : (d > 0 ? " (+" + d + ")" : d < 0 ? " (" + d + ")" : " (=)");
-    return '<div style="margin:var(--s4) 0 var(--s1)">' +
-      '<label for="' + id + '" style="display:flex;justify-content:space-between;align-items:baseline">' +
-        "<span>" + label + '</span><span class="mono" id="' + id + '-v" style="color:var(--teal)">' + val + "<small>" + dtxt + "</small></span></label>" +
+    const dtxt = d == null || d === 0 ? "" : (d > 0 ? "+" + d : String(d));
+    return '<div class="sld">' +
+      '<div class="sld-top"><label for="' + id + '">' + label + "</label>" +
+        '<span class="sld-val"><b id="' + id + '-v">' + val + "</b>" +
+        (dtxt ? '<small>' + dtxt + "</small>" : "") + "</span></div>" +
       '<input type="range" id="' + id + '" min="1" max="10" step="1" value="' + val + '" data-slider="' + group + ":" + key + '">' +
-      '<div class="hintline" id="hint-' + id + '">шаг ' + stepText + (hint ? " · " + hint : "") + "</div>" +
+      '<div class="hintline" id="hint-' + id + '">' + (hint || "") + "</div>" +
     "</div>";
   }
 
@@ -785,37 +844,50 @@
       unstructured_avoid: "из данных: " + cs.entriesPerDay + " переключений в день"
     };
 
-    let h = '<section class="card"><div class="between"><h2 style="margin:0">Цикл</h2>' +
-      '<span class="chip">' + (cycleDay() == null ? "не начат" : "день " + cycleDay() + " из " + S.config.checkpoint_interval_days) + "</span></div>";
+    let h = '<section class="card"><div class="between"><div><div class="label">цикл</div>' +
+      '<div class="big">' + (cycleDay() == null ? "—" : cycleDay()) + '<small>день из ' + S.config.checkpoint_interval_days + "</small></div></div>" +
+      (quest ? '<span class="chip"><span class="dot"></span>квест идёт</span>' : '<span class="chip">не начат</span>') + "</div>";
     if (quest) {
-      h += "<p>" + esc(quest.hypothesis) + '</p><p class="note">объявлен ' + fmtDate(quest.declared_at) + "</p>" +
+      h += '<div class="divider"></div><p style="margin-top:var(--s3)">' + esc(quest.hypothesis) + '</p>' +
+        '<p class="note">объявлен ' + fmtDate(quest.declared_at) + "</p>" +
         '<div class="row" style="margin-top:var(--s3)"><button type="button" class="primary" data-verdict="worked">Сработало</button>' +
         '<button type="button" data-verdict="hard">Сложно</button><button type="button" data-verdict="no">Не подошло</button></div>';
     } else {
-      h += '<p class="dim">Один эксперимент на цикл. Без него сравнение двух настроений не даёт знания.</p>' +
+      h += '<div class="divider"></div><p class="note" style="margin-top:var(--s3)">Один эксперимент на цикл. Без него сравнение двух настроений не даёт знания.</p>' +
         '<label for="questText">Гипотеза на две недели</label>' +
         '<input id="questText" placeholder="Первые 40 минут работы без фонового звука">' +
         '<div class="row" style="margin-top:var(--s3)"><button type="button" data-act="questStart">Объявить квест</button></div>';
     }
     h += "</section>";
 
-    h += '<section class="card"><h2>' + (last ? "Новая точка сохранения" : "Первая точка сохранения") + "</h2>" +
-      '<p class="note">Это не оценка, а состояние на сегодня. Дельта показана к прошлому чекпоинту.</p>' +
-      '<p class="note">Ползунки с пометкой «из данных» подставлены из журнала и прошлых прокси. Их можно поправить — но начинать с числа честнее, чем с настроения.</p>' +
-      "<h3>Ресурсные статы</h3>" +
-      Object.keys(STATS).map((k) => slider("stats", k, STATS[k], sv[k], prevStats ? prevStats[k] : null, "1.75 пп базы", hints[k] || "")).join("") +
-      "<h3>Дебаффы</h3>" +
-      Object.keys(DEBUFFS).map((k) => slider("debuffs", k, DEBUFFS[k], dv[k], prevDebuffs ? prevDebuffs[k] : null, "0.75 пп базы", hints[k] || "")).join("") +
-      "<h3>Числовые прокси</h3><div class=\"grid2\">" +
+    h += '<section class="card"><div class="label">' + (last ? "точка сохранения" : "первая точка") + "</div>" +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Ресурс</h2>' +
+      '<p class="note">Состояние на сегодня, не оценка. Дельта — к прошлому чекпоинту. Шаг ползунка — 1.75 пп базы.</p>' +
+      Object.keys(STATS).map((k) => slider("stats", k, STATS[k], sv[k], prevStats ? prevStats[k] : null, hints[k] || "")).join("") +
+      "</section>";
+
+    h += '<section class="card"><div class="label">дебаффы</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Что тянет вниз</h2>' +
+      '<p class="note">Шаг ползунка — 0.75 пп базы. Пометка «из данных» подставлена из журнала, её можно поправить.</p>' +
+      Object.keys(DEBUFFS).map((k) => slider("debuffs", k, DEBUFFS[k], dv[k], prevDebuffs ? prevDebuffs[k] : null, hints[k] || "")).join("") +
+      "</section>";
+
+    h += '<section class="card"><div class="label">числовые прокси</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Утро и новости</h2>' +
+      '<div class="grid2">' +
         '<div><label for="behMin">Минут до первого телефона</label><input id="behMin" type="number" inputmode="numeric" value="' + (cur.behaviors && cur.behaviors.minutes_to_phone != null ? cur.behaviors.minutes_to_phone : "") + '"></div>' +
         '<div><label for="behNews">Проверок новостей за день</label><input id="behNews" type="number" inputmode="numeric" value="' + (cur.behaviors && cur.behaviors.news_checks != null ? cur.behaviors.news_checks : "") + '"></div>' +
-      "</div>" +
-      "<h3>Контекст</h3>" +
+      "</div></section>";
+
+    h += '<section class="card"><div class="label">контекст</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Что было вокруг</h2>' +
       '<div class="tags" id="tagBox">' + TAGS.map((t) => '<button type="button" class="tagchip" aria-pressed="false" data-tag="' + esc(t) + '">' + esc(t) + "</button>").join("") + "</div>" +
-      '<label for="cpNote">Заметка</label><textarea id="cpNote">' + esc(cur.note || "") + "</textarea>" +
-      '<div class="divider"></div>' +
-      '<div class="between" id="basePreview"><span class="dim">Новая база</span><span class="mono" id="basePreviewVal">—</span></div>' +
-      '<div class="row" style="margin-top:var(--s3)"><button type="button" class="primary" data-act="saveCP">Сохранить точку</button></div></section>';
+      '<label for="cpNote">Заметка</label><textarea id="cpNote">' + esc(cur.note || "") + "</textarea></section>";
+
+    h += '<section class="card"><div class="label">новая база</div>' +
+      '<div id="basePreview" style="margin-top:var(--s2)"><span class="big" id="basePreviewVal">—</span>' +
+      '<div class="note" id="basePrevNote">до сохранения точки</div></div>' +
+      '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-act="saveCP">Сохранить точку</button></div></section>';
 
     if (last && prev) {
       h += '<section class="card"><div class="between"><h2 style="margin:0">Патч-ноут</h2>' +
@@ -830,31 +902,51 @@
   function renderMirror() {
     const cps = S.checkpoints.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
     if (cps.length < 2) {
-      return '<section class="card"><h2>Зеркало прошлого</h2>' +
-        '<p class="dim">Нужны как минимум две точки. Первая уже есть — вторая через две недели.</p>' +
-        '<div class="row" style="margin-top:var(--s3)"><button type="button" class="primary" data-go="checkpoint">Сделать вторую</button></div></section>';
+      return '<section class="card"><div class="label">нужны две точки</div>' +
+        '<h2 style="margin:var(--s2) 0 var(--s3)">Зеркало прошлого</h2>' +
+        '<p class="note">Первая точка уже есть. Вторая — через две недели: только тогда станет видно, что именно сдвинулось.</p>' +
+        '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-go="checkpoint">Сделать вторую</button></div></section>';
     }
     const a = cps[0], b = cps[cps.length - 1];
-    const db = (baseFrom(b) || 0) - (baseFrom(a) || 0);
+    const ba = baseFrom(a) || 0, bb = baseFrom(b) || 0;
+    const db = round1(bb - ba);
+    const days = Math.max(1, Math.round((Date.parse(b.date) - Date.parse(a.date)) / 864e5));
 
-    function row(l, x, y, max) {
-      return '<div class="db-row"><span class="dim">' + esc(l) + "</span>" +
-        '<div class="db-track"><div class="db-a" style="left:calc(' + (x / max * 100) + "% - 4px)\"></div>" +
-        '<div class="db-b" style="left:calc(' + (y / max * 100) + "% - 4px)\"></div></div>" +
-        '<span class="db-val">' + x + " → " + y + "</span></div>";
+    function row(l, x, y, max, up) {
+      const d = y - x;
+      const good = up ? d > 0 : d < 0;
+      const dt = (d > 0 ? "+" : "") + d;
+      return '<div class="db-row">' +
+        '<div class="db-head"><span class="db-name">' + esc(l) + "</span>" +
+        '<span class="db-val">' + x + " → " + y +
+        (d === 0 ? "" : ' <b class="' + (good ? "db-good" : "db-bad") + '">' + dt + "</b>") +
+        "</span></div>" +
+        '<div class="db-track"><span class="db-prev" style="left:' + (x / max * 100).toFixed(1) + '%"></span>' +
+        '<span class="db-cur" style="left:' + (y / max * 100).toFixed(1) + '%"></span></div>' +
+        "</div>";
     }
 
-    return '<section class="card"><div class="between"><h2 style="margin:0">Тогда и сейчас</h2>' +
-      '<span class="chip">' + fmtDate(a.date) + " → " + fmtDate(b.date) + "</span></div>" +
-      '<p class="note">База заряда: <b class="mono">' + (baseFrom(a) || 0) + "% → " + (baseFrom(b) || 0) + "%</b> (" +
-        (db > 0 ? "+" : "") + db.toFixed(1) + " пп)</p>" +
-      "<h3>Ресурсные статы — чем выше, тем лучше</h3>" +
-      '<div class="dumbbell">' + Object.keys(STATS).map((k) => row(STATS[k], a.stats[k], b.stats[k], 10)).join("") + "</div>" +
-      "<h3>Дебаффы — чем ниже, тем лучше</h3>" +
-      '<div class="dumbbell">' + Object.keys(DEBUFFS).map((k) => row(DEBUFFS[k], a.debuffs[k], b.debuffs[k], 10)).join("") + "</div>" +
-      '<div class="divider"></div><p class="note">Тусклая метка — прошлое, светлая — сейчас.</p></section>' +
-      '<section class="card"><h2>Патч-ноут периода</h2><div class="patch">' + patchBody(patchNote(a, b)) + "</div></section>" +
-      (b.note ? '<section class="card"><h3 style="margin-top:0">Заметка ' + fmtDate(b.date) + '</h3><p class="dim">' + esc(b.note) + "</p></section>" : "");
+    return '<section class="card"><div class="label">база заряда</div>' +
+      '<div class="big ' + (db > 0 ? "big--lime" : db < 0 ? "" : "big--mute") + '" style="margin-top:var(--s2)">' +
+        (db > 0 ? "+" : "") + db.toFixed(1) + '<small>пп</small></div>' +
+      '<p class="note" style="margin-top:var(--s3)">' + ba + "% → " + bb + "% · " +
+        (days === 1 ? "день" : days + " дн.") + " между точками</p>" +
+      '<div class="tabs-text" style="margin:var(--s4) 0 0"><span class="chip">' + fmtDate(a.date) + " → " + fmtDate(b.date) + "</span></div></section>" +
+
+      '<section class="card"><div class="label">статы</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s4)">Чем выше, тем лучше</h2>' +
+      '<div class="dumbbell">' + Object.keys(STATS).map((k) => row(STATS[k], a.stats[k], b.stats[k], 10, true)).join("") + "</div></section>" +
+
+      '<section class="card"><div class="label">дебаффы</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s4)">Что тянет вниз</h2>' +
+      '<div class="dumbbell">' + Object.keys(DEBUFFS).map((k) => row(DEBUFFS[k], a.debuffs[k], b.debuffs[k], 10, false)).join("") + "</div>" +
+      '<p class="hintline" style="margin-top:var(--s4)">Мутная точка — тогда, лаймовая — сейчас. Цифра справа — сдвиг.</p></section>' +
+
+      '<section class="card"><div class="label">патч-ноут</div>' +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Что менялось в периоде</h2>' +
+      '<div class="patch">' + patchBody(patchNote(a, b)) + "</div></section>" +
+      (b.note ? '<section class="card"><div class="label">заметка</div>' +
+        '<p class="dim" style="margin-top:var(--s2)">' + esc(b.note) + "</p></section>" : "");
   }
 
   // ─────────────────────────────── отрисовка ───────────────────────────────
@@ -891,9 +983,11 @@
       const mc = $("#modeClock");
       if (mc && activeTab === "moment") {
         const r = S.runtime;
-        if (momentMode === "scout" && r.scout_end) mc.textContent = hhmm(r.scout_end - Date.now());
-        else if (momentMode === "focus" && r.focus_start) mc.textContent = hhmm(Date.now() - r.focus_start);
-        else if (momentMode === "window" && r.window_end) mc.textContent = hhmm(r.window_end - Date.now());
+        let t = null;
+        if (momentMode === "scout" && r.scout_end) t = hhmm(r.scout_end - Date.now());
+        else if (momentMode === "focus" && r.focus_start) t = hhmm(Date.now() - r.focus_start);
+        else if (momentMode === "window" && r.window_end) t = hhmm(r.window_end - Date.now());
+        if (t) mc.innerHTML = clockHTML(t, true);
       }
       return;
     }
@@ -1127,7 +1221,7 @@
         const bk = readKey(BACKUP_KEY);
         if (!bk) { toast("Резервная копия не найдена"); return; }
         S = mergeStates(S, bk); save(); render();
-        toast("Копия восстановлена: " + S.checkpoints.length + " чекпоинтов"); break;
+        toast("Копия восстановлена: " + S.checkpoints.length + " " + plural(S.checkpoints.length, CP)); break;
       }
     }
   }
@@ -1135,10 +1229,7 @@
   function applySuggestion(key, val, hint) {
     const id = key.replace(":", "-");
     const hintEl = $("#hint-" + id);
-    if (hintEl) {
-      const stepTxt = id.indexOf("stats-") === 0 ? "1.75 пп базы" : "0.75 пп базы";
-      hintEl.textContent = "шаг " + stepTxt + (hint ? " · " + hint : "");
-    }
+    if (hintEl && hint) hintEl.textContent = hint;
     if (val == null || touchedSliders.has(key)) return;
     const el = $("#" + id);
     if (!el) return;
@@ -1164,9 +1255,13 @@
     const nb = baseFrom({ stats, debuffs });
     const old = S.runtime.base;
     const d = old != null && nb != null ? nb - old : null;
-    el.innerHTML = (nb == null ? "—" : nb.toFixed(1) + "%") +
-      (d == null ? "" : ' <span class="mute" style="font-size:12px">(' +
-        (d > 0 ? "+" : "") + d.toFixed(1) + " пп к базе" + (old != null ? ", было " + old + "%" : "") + ")</span>");
+    el.textContent = nb == null ? "—" : nb.toFixed(1) + "%";
+    const note = $("#basePrevNote");
+    if (note) {
+      note.textContent = d == null
+        ? "первая база цикла: " + (old != null ? "было " + old + "%" : "нет прошлой точки")
+        : (d > 0 ? "+" : "") + d.toFixed(1) + " пп к базе" + (old != null ? " " + old + "%" : "");
+    }
   }
 
   function saveCheckpoint() {
@@ -1435,13 +1530,13 @@
       }
       openModal({
         title: "Импорт данных",
-        html: "<p>В файле " + data.checkpoints.length + " чекпоинтов и " + (data.captures || []).length + " записей. " +
+        html: "<p>В файле " + data.checkpoints.length + " " + plural(data.checkpoints.length, CP) + " и " + (data.captures || []).length + " " + plural((data.captures || []).length, CAP) + ". " +
           "Слияние сохранит и текущие данные, и данные из файла: при совпадении записей останется более свежая версия.</p>" +
           '<p class="note">Замена удалит текущие данные без возможности отмены.</p>',
         actions: [
           { label: "Отмена", onClick: closeModal },
-          { label: "Слить", kind: "primary", onClick: () => { S = mergeStates(S, data); save(); closeModal(); render(); toast("Слито: " + S.checkpoints.length + " чекпоинтов"); } },
-          { label: "Заменить", kind: "danger", onClick: () => { S = migrate(data); save(); closeModal(); render(); toast("Заменено: " + S.checkpoints.length + " чекпоинтов"); } }
+          { label: "Слить", kind: "primary", onClick: () => { S = mergeStates(S, data); save(); closeModal(); render(); toast("Слито: " + S.checkpoints.length + " " + plural(S.checkpoints.length, CP)); } },
+          { label: "Заменить", kind: "danger", onClick: () => { S = migrate(data); save(); closeModal(); render(); toast("Заменено: " + S.checkpoints.length + " " + plural(S.checkpoints.length, CP)); } }
         ]
       });
     };
@@ -2192,7 +2287,7 @@
       ]
     });
   } else if (restoredFromLegacy) {
-    toast("Данные восстановлены: " + S.checkpoints.length + " чекпоинтов");
+    toast("Данные восстановлены: " + S.checkpoints.length + " " + plural(S.checkpoints.length, CP));
   }
 
   if (readErrors.length) {
