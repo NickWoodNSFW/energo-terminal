@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v29";
+  const BUILD = "et-v30";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -1305,6 +1305,10 @@
     if (at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0)) {
       out.runtime = Object.assign({}, a.runtime, { base: b.runtime.base, battery: b.runtime.battery, battery_at: b.runtime.battery_at });
     }
+    if (a.runtime.battery != null && b.runtime.battery != null && Math.abs(a.runtime.battery - b.runtime.battery) > 0.3) {
+      const newer = at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0) ? b.runtime.battery_at : a.runtime.battery_at;
+      out.runtime = Object.assign({}, out.runtime, { battery: round1((a.runtime.battery + b.runtime.battery) / 2), battery_at: newer });
+    }
     const wa = at(a.runtime.work && a.runtime.work.updated_at, 0);
     const wb = at(b.runtime.work && b.runtime.work.updated_at, skew);
     if (wb > wa) {
@@ -1613,6 +1617,16 @@
       .map((k) => part(st[k])).join("|");
   }
 
+  function stateKey(st) {
+    const r = st.runtime || {};
+    const w = r.work || {};
+    return recordsKey(st) +
+      "|w:" + (w.updated_at || "") + (w.active ? "1" : "0") + ":" + (w.started_at || "") +
+      "|e:" + (r.last_entry_at || "") +
+      "|b:" + (r.base == null ? "" : r.base) +
+      "|c:" + (r.cp_at || "");
+  }
+
   async function mergeRemote() {
     const txt = await cloudDownload();
     if (!txt) return false;
@@ -1622,7 +1636,7 @@
     if (data.meta && data.meta.device_id === S.meta.device_id) return false;
     if (modalOpen()) return false;
     const comb = mergeStates(S, data);
-    if (recordsKey(comb) === recordsKey(S)) return false;
+    if (stateKey(comb) === stateKey(S)) return false;
     S = comb;
     S.sync.lastDevice = (data.meta && data.meta.device_id) || S.sync.lastDevice;
     return true;
