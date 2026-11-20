@@ -1566,9 +1566,11 @@
   }
 
   async function adoptCloud(v) {
-    const mode = v && v.mode === "yandex" ? "yandex" : "gist";
+    let mode = v && v.mode === "yandex" ? "yandex" : "gist";
     const tk = cleanToken(v && v.tok);
     S.sync.clientId = ((v && v.cid) || "").trim();
+    if (/^gh[pousr]_/.test(tk) || /^github_pat_/.test(tk)) mode = "gist";
+    else if (/^y0_/.test(tk) || /^AQAA/.test(tk)) mode = "yandex";
     if (!tk) { save({ sync: false }); toast(mode === "gist" ? "Вставьте токен GitHub с правом gist" : "Вставьте access_token Яндекса"); return; }
     S.sync.mode = mode;
     if (mode === "gist") { S.sync.ghToken = tk; S.sync.token = ""; }
