@@ -15,7 +15,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v31";
+  const BUILD = "et-v32";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -176,6 +176,70 @@
   function drainMult() { return 1 + (1 - sleepFactor()) * Number(S.config.sleep_drain_k || 0.5); }
   function workActive() { return !!(S.runtime.work && S.runtime.work.active); }
   function isResidue() { const u = S.runtime.residue_until; return !!(u && Date.now() < u); }
+
+  const CIRCADIAN = [[0, 0.10], [4, 0.15], [6, 0.35], [8, 0.75], [10, 0.95], [12, 0.80],
+    [14, 0.60], [16, 0.72], [18, 0.76], [20, 0.64], [22, 0.40], [24, 0.10]];
+
+  function circadianAt(ts) {
+    const d = new Date(ts), h = d.getHours() + d.getMinutes() / 60;
+    for (let i = 1; i < CIRCADIAN.length; i++) {
+      if (h <= CIRCADIAN[i][0]) {
+        const a = CIRCADIAN[i - 1], b = CIRCADIAN[i];
+        const k = (h - a[0]) / ((b[0] - a[0]) || 1);
+        return a[1] + (b[1] - a[1]) * k;
+      }
+    }
+    return CIRCADIAN[CIRCADIAN.length - 1][1];
+  }
+
+  function wakeAt(ts) {
+    const to = toMin(S.config.sleep_to);
+    const w = new Date(ts);
+    w.setHours(Math.floor(to / 60), to % 60, 0, 0);
+    if (w.getTime() > ts) w.setDate(w.getDate() - 1);
+    return w.getTime();
+  }
+
+  function sleepPressureAt(ts) {
+    const awakeH = Math.max(0, (ts - wakeAt(ts)) / 3600e3);
+    const load = clamp(awakeH / 18, 0, 1);
+    const debt = clamp(1 - sleepFactor(), 0, 1);
+    return clamp(0.6 * load + 0.4 * debt, 0, 1);
+  }
+
+  function formAt(ts) {
+    return clamp(circadianAt(ts) * (1 - 0.55 * sleepPressureAt(ts)), 0.05, 1);
+  }
+  function formNow() { return formAt(Date.now()); }
+
+  const FORM_FROM = 7, FORM_TO = 23, FORM_H = 56;
+
+  function formMarkerX(ts) {
+    const d = new Date(ts), h = d.getHours() + d.getMinutes() / 60;
+    return clamp(((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240, 0, 240);
+  }
+
+  function formCard() {
+    const pts = [];
+    for (let h = FORM_FROM; h <= FORM_TO; h += 0.5) {
+      const d = new Date();
+      d.setHours(Math.floor(h), Math.round((h - Math.floor(h)) * 60), 0, 0);
+      const x = ((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240;
+      const y = FORM_H - formAt(d.getTime()) * FORM_H;
+      pts.push(x.toFixed(1) + "," + y.toFixed(1));
+    }
+    const nx = formMarkerX(Date.now()).toFixed(1);
+    return '<section class="card card--tight">' +
+      '<div class="between"><h2 style="margin:0">Форма дня</h2>' +
+        '<span class="chip mono" id="formVal">' + Math.round(formNow() * 100) + "%</span></div>" +
+      '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус накопленная усталость: как голова работает сейчас, независимо от заряда.</p>' +
+      '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="' + FORM_H + '" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
+        '<polyline points="' + pts.join(" ") + '" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linejoin="round" />' +
+        '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="var(--teal)" stroke-width="1.5" />' +
+      "</svg>" +
+      '<p class="note" style="margin-top:8px">Спад после обеда и к вечеру — часть ритма, а не сбой. Кривая калибровочная.</p>' +
+      "</section>";
+  }
 
   function slotMinutes(id) {
     const t = S.runtime.slot_on && S.runtime.slot_on[id];
@@ -443,7 +507,7 @@
       '<div class="sleepline"><span>Сон <b class="mono">' + lastNightHours() + " ч</b> · потолок <b class=\"mono\">" +
         Math.round(f * 100) + "%</b> · расход <b class=\"mono\">×" + drainMult().toFixed(2) + "</b></span>" +
         '<button type="button" class="link" data-sheet="sleep">Изменить</button></div>' +
-    "</section>";
+    "</section>" + formCard();
   }
 
   function protocolsRow() {
@@ -821,6 +885,13 @@
       return;
     }
     const val = $("#heroVal"); if (!val) return;
+    const fv = $("#formVal");
+    if (fv) fv.textContent = Math.round(formNow() * 100) + "%";
+    const fm = $("#formNow");
+    if (fm) {
+      const fx = formMarkerX(Date.now()).toFixed(1);
+      fm.setAttribute("x1", fx); fm.setAttribute("x2", fx);
+    }
     const v = liveValue(); if (v == null) return;
     val.innerHTML = v.toFixed(2) + "<span>%</span>";
     const sp = $("#heroSpent"); if (sp) sp.textContent = "потрачено " + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " пп";
@@ -1863,6 +1934,7 @@
         "<p><b>Окно</b> — не бесплатно: " + S.config.window_rate + " пп/час. Отдых восстанавливает хуже, чем кажется.</p>" +
         "<p><b>Долг</b> — заряд может уйти ниже нуля до " + S.config.debt_floor + " пп. Отрицательное значение значит, что вы тратите вперёд.</p>" +
         "<p><b>Сон</b> — внутри вашего окна заряд растёт на " + S.config.night_recharge + " пп/час, но только если потребители выключены. Потолок равен базе, урезанной по прошлой ночи.</p>" +
+        "<p><b>Форма дня</b> — суточный ритм минус накопленная усталость. Ритм даёт пик около 10 утра, спад после обеда и второй подъём к 18:00; усталость растёт от часов бодрствования и от недосыпа. Это отдельная величина от заряда: заряд — сколько ресурса осталось, форма — насколько он доступен прямо сейчас.</p>" +
         "<p><b>Работа и дорога</b> — отдельный расход, по умолчанию около 0.5 пп/час.</p>" +
         "<p class=\"note\">Все коэффициенты — калибровка, а не измерение. Форма модели опирается на исследования, числа подбираются под ваши ощущения за два-три чекпоинта.</p>",
       actions: [{ label: "Понятно", kind: "primary", onClick: closeModal }]
