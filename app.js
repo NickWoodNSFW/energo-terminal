@@ -1257,9 +1257,15 @@
     });
   }
 
+  function stateForCloud() {
+    const copy = JSON.parse(JSON.stringify(S));
+    if (copy.sync) { copy.sync.ghToken = ""; copy.sync.token = ""; copy.sync.clientId = ""; }
+    return copy;
+  }
+
   function exportFile() {
     S.meta.last_updated = nowISO();
-    const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(stateForCloud(), null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "energo-terminal-" + todayKey() + ".json";
@@ -1477,7 +1483,7 @@
       S.sync.lastSync = nowISO();
       S.sync.lastError = null;
       save({ sync: false });
-      await cloudUpload(JSON.stringify(S));
+      await cloudUpload(JSON.stringify(stateForCloud()));
       pushedFp = stateFingerprint();
       if (merged) render();
       updateSyncHint();
@@ -1528,7 +1534,7 @@
       }
       S.sync.lastSync = nowISO();
       S.sync.lastError = null;
-      await cloudUpload(JSON.stringify(S));
+      await cloudUpload(JSON.stringify(stateForCloud()));
       pushedFp = stateFingerprint();
       save({ sync: false }); closeModal(); toast("Выгружено в облако");
     } catch (e) { toast("Ошибка: " + e.message); }
