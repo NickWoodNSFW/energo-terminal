@@ -27,7 +27,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v34";
+  const BUILD = "et-v35";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -426,11 +426,11 @@
 
   // ─────────────────────────────── компоненты ───────────────────────────────
   function levelOf(b) {
-    if (b < 0) return { c1: "#e0685f", c2: "#7f1d1d" };
-    if (b >= 60) return { c1: "#10b981", c2: "#0e7490" };
-    if (b >= 35) return { c1: "#60a5fa", c2: "#1d4ed8" };
-    if (b >= 15) return { c1: "#f59e0b", c2: "#b45309" };
-    return { c1: "#e8894a", c2: "#9a3412" };
+    if (b < 0) return { c1: "#ff7a6b", c2: "#7a2216" };
+    if (b >= 60) return { c1: "#e2f163", c2: "#8ea52b" };
+    if (b >= 35) return { c1: "#cfe07a", c2: "#63731f" };
+    if (b >= 15) return { c1: "#f0d98a", c2: "#8a6f24" };
+    return { c1: "#ff9f6b", c2: "#a04a1c" };
   }
 
   function statusBadge(value) {

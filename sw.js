@@ -1,4 +1,4 @@
-const CACHE = "et-v34";
+const CACHE = "et-v35";
 const SHELL = [
   "./",
   "./index.html",
@@ -7,7 +7,21 @@ const SHELL = [
   "./manifest.webmanifest",
   "./icon-180.png",
   "./icon-192.png",
-  "./icon-512.png"
+  "./icon-512.png",
+  "./fonts/onest-400-cyrillic-ext.woff2",
+  "./fonts/onest-400-cyrillic.woff2",
+  "./fonts/onest-400-latin-ext.woff2",
+  "./fonts/onest-400-latin.woff2",
+  "./fonts/onest-600-cyrillic-ext.woff2",
+  "./fonts/onest-600-cyrillic.woff2",
+  "./fonts/onest-600-latin-ext.woff2",
+  "./fonts/onest-600-latin.woff2",
+  "./fonts/playfair-700-cyrillic.woff2",
+  "./fonts/playfair-700-latin-ext.woff2",
+  "./fonts/playfair-700-latin.woff2",
+  "./fonts/playfair-900-cyrillic.woff2",
+  "./fonts/playfair-900-latin-ext.woff2",
+  "./fonts/playfair-900-latin.woff2"
 ];
 
 self.addEventListener("install", (e) => {
