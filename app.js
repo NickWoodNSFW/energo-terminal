@@ -15,7 +15,19 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
   const todayKey = () => new Date().toISOString().slice(0, 10);
-  const BUILD = "et-v32";
+  const ICONS = {
+    bolt: '<path d="M13 2 5 13h5l-1 9 8-11h-5l1-9z"/>',
+    shield: '<path d="M12 3 5 6v5c0 4.2 2.9 7.7 7 9 4.1-1.3 7-4.8 7-9V6l-7-3z"/>',
+    leaf: '<path d="M5 19c0-8 5-13 14-13 0 9-5 14-13 14"/><path d="M5 19c3-4 6-6 10-7"/>',
+    down: '<path d="M12 5v14"/><path d="m6 13 6 6 6-6"/>',
+    up: '<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',
+    pencil: '<path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="m14 6 4 4"/>'
+  };
+  function icon(name, size) {
+    const s = size || 16;
+    return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
+  }
+  const BUILD = "et-v34";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -211,6 +223,7 @@
     return clamp(circadianAt(ts) * (1 - 0.55 * sleepPressureAt(ts)), 0.05, 1);
   }
   function formNow() { return formAt(Date.now()); }
+  function formMult() { return clamp(1 + 0.9 * (1 - formNow()), 1, 1.8); }
 
   const FORM_FROM = 7, FORM_TO = 23, FORM_H = 56;
 
@@ -231,8 +244,8 @@
     const nx = formMarkerX(Date.now()).toFixed(1);
     return '<section class="card card--tight">' +
       '<div class="between"><h2 style="margin:0">Форма дня</h2>' +
-        '<span class="chip mono" id="formVal">' + Math.round(formNow() * 100) + "%</span></div>" +
-      '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус накопленная усталость: как голова работает сейчас, независимо от заряда.</p>' +
+        '<span class="chip mono"><b id="formVal">' + Math.round(formNow() * 100) + '%</b> · ×<span id="formMul">' + formMult().toFixed(2) + "</span></span></div>" +
+      '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус усталость. Чем ниже форма, тем дороже то же залипание — вечером расход выше, чем утром.</p>' +
       '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="' + FORM_H + '" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
         '<polyline points="' + pts.join(" ") + '" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linejoin="round" />' +
         '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="var(--teal)" stroke-width="1.5" />' +
@@ -254,7 +267,7 @@
     if (S.runtime.status === "cooling") return -Math.abs(Number(S.config.window_rate) || 0.15);
     const drainsOn = S.slots.some((s) => s.active && s.kind === "drain");
     if (isNight() && !drainsOn && !workActive()) return S.config.night_recharge;
-    const mult = drainMult();
+    const mult = drainMult() * formMult();
     let r = 0;
     if (workActive()) r -= S.config.drain_coef * (Number(S.runtime.work.weight) || 0) * mult;
     for (const s of S.slots) {
@@ -472,7 +485,7 @@
     const v = liveValue();
     if (v == null) {
       return '<section class="card hero"><div class="hero-top"><div>' +
-        '<div class="hero-num" style="color:var(--mute)">—<span>%</span></div>' +
+        '<div class="hero-num hero-num--empty">—</div>' +
         '<div class="hero-sub">Заряд считается от последней точки сохранения</div></div>' +
         '<span class="badge badge--flat"><span class="dot"></span>база не задана</span></div>' +
         '<div class="divider"></div>' +
@@ -515,13 +528,13 @@
     const pausesLeft = Math.max(0, S.config.micro_pause_limit - (r.pause_day === todayKey() ? (r.pause_count || 0) : 0));
     return '<section class="card card--tight"><h2>Протоколы</h2><div class="protocols">' +
       '<button type="button" class="pill" data-act="scout"' + (r.scout_end ? " disabled" : "") + ">" +
-        "<span>⚡ " + (r.scout_end ? "Разведка · " + hhmm(r.scout_end - Date.now()) : "Разведка 5 мин") + "</span>" +
+        "<span>" + icon("bolt", 15) + " " + (r.scout_end ? "Разведка · " + hhmm(r.scout_end - Date.now()) : "Разведка 5 мин") + "</span>" +
         '<span class="pill-meta">туман</span></button>' +
       '<button type="button" class="pill" data-act="window"' + (r.window_end ? " disabled" : "") + ">" +
-        "<span>🛡 " + (r.window_end ? "Окно · " + hhmm(r.window_end - Date.now()) : "Окно 45 мин") + "</span>" +
+        "<span>" + icon("shield", 15) + " " + (r.window_end ? "Окно · " + hhmm(r.window_end - Date.now()) : "Окно 45 мин") + "</span>" +
         '<span class="pill-meta">пауза</span></button>' +
       '<button type="button" class="pill" data-act="microPause">' +
-        "<span>🌿 15 мин без экрана</span>" +
+        "<span>" + icon("leaf", 15) + " 15 мин без экрана</span>" +
         '<span class="pill-meta">+' + S.config.micro_pause + " · " + pausesLeft + "/" + S.config.micro_pause_limit + "</span></button>" +
     "</div></section>";
   }
@@ -557,12 +570,12 @@
 
     return '<div class="tile tile--' + s.kind + (s.active ? " is-on" : "") + '">' +
       '<button type="button" class="tile-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '">' +
-        '<div class="tile-name">' + (s.kind === "drain" ? "▼ " : "▲ ") + esc(s.title) + "</div>" +
+        '<div class="tile-name">' + (s.kind === "drain" ? icon("down", 12) : icon("up", 12)) + esc(s.title) + "</div>" +
         '<div class="tile-trig">' + esc(s.trigger) + (s.context !== "any" ? " · " + (s.context === "mechanical" ? "механика" : "когнитивная") : "") + "</div>" +
         '<div class="tile-meta">' + meta + "</div>" +
         (s.active ? '<div class="tile-live" id="tm-' + s.id + '">' + liveTileText(s) + "</div>" : "") +
       "</button>" +
-      '<button type="button" class="tile-edit" data-edit="' + s.id + '" aria-label="Настроить слот «' + esc(s.title) + '»">✎</button>' +
+      '<button type="button" class="tile-edit" data-edit="' + s.id + '" aria-label="Настроить слот «' + esc(s.title) + '»">' + icon("pencil", 16) + '</button>' +
     "</div>";
   }
 
@@ -887,6 +900,8 @@
     const val = $("#heroVal"); if (!val) return;
     const fv = $("#formVal");
     if (fv) fv.textContent = Math.round(formNow() * 100) + "%";
+    const fmul = $("#formMul");
+    if (fmul) fmul.textContent = formMult().toFixed(2);
     const fm = $("#formNow");
     if (fm) {
       const fx = formMarkerX(Date.now()).toFixed(1);
@@ -1934,7 +1949,7 @@
         "<p><b>Окно</b> — не бесплатно: " + S.config.window_rate + " пп/час. Отдых восстанавливает хуже, чем кажется.</p>" +
         "<p><b>Долг</b> — заряд может уйти ниже нуля до " + S.config.debt_floor + " пп. Отрицательное значение значит, что вы тратите вперёд.</p>" +
         "<p><b>Сон</b> — внутри вашего окна заряд растёт на " + S.config.night_recharge + " пп/час, но только если потребители выключены. Потолок равен базе, урезанной по прошлой ночи.</p>" +
-        "<p><b>Форма дня</b> — суточный ритм минус накопленная усталость. Ритм даёт пик около 10 утра, спад после обеда и второй подъём к 18:00; усталость растёт от часов бодрствования и от недосыпа. Это отдельная величина от заряда: заряд — сколько ресурса осталось, форма — насколько он доступен прямо сейчас.</p>" +
+        "<p><b>Форма дня</b> — суточный ритм минус накопленная усталость. Ритм даёт пик около 10 утра, спад после обеда и второй подъём к 18:00; усталость растёт от часов бодрствования и от недосыпа. Форма умножает расход: в провале тот же слот стоит дороже, чем утром, — при 90% множитель 1.05, при 40% около 1.5.</p>" +
         "<p><b>Работа и дорога</b> — отдельный расход, по умолчанию около 0.5 пп/час.</p>" +
         "<p class=\"note\">Все коэффициенты — калибровка, а не измерение. Форма модели опирается на исследования, числа подбираются под ваши ощущения за два-три чекпоинта.</p>",
       actions: [{ label: "Понятно", kind: "primary", onClick: closeModal }]
