@@ -35,7 +35,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v45";
+  const BUILD = "et-v46";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -579,16 +579,6 @@
     return debt + '<span class="badge badge--flat"><span class="dot"></span>баланс</span>';
   }
 
-  function tileAccrued(s) {
-    const m = slotMinutes(s.id), w = Number(s.weight) || 0;
-    const rate = s.kind === "drain" ? -S.config.drain_coef * w * drainMult() : S.config.stab_coef * w;
-    return { minutes: m, delta: rate * (m / 60) };
-  }
-  function liveTileText(s) {
-    const a = tileAccrued(s);
-    return hhmm(a.minutes * 60000) + " · " + (a.delta >= 0 ? "+" : "−") + Math.abs(a.delta).toFixed(2) + " пп";
-  }
-
   function sparkBlock() {
     const arr = (S.runtime.samples || []).slice();
     const v = liveValue();
@@ -746,38 +736,71 @@
       "</div></section>";
   }
 
-  function tile(s) {
+  function slotRate(s) {
+    const w = Number(s.weight) || 0;
+    return s.kind === "drain"
+      ? -S.config.drain_coef * w
+      : S.config.stab_coef * w * (s.context === "cognitive" ? -0.8 : 1);
+  }
+
+  function slotLive(s) {
+    if (!s.active) return 0;
+    if (S.runtime.status === "cooling") return 0;
+    if (isResidue() && s.kind === "stab") return 0;
+    return slotRate(s) * slotMult(s.id);
+  }
+
+  function flowRow(s) {
     const w = Number(s.weight) || 0;
     const inWin = S.runtime.status === "cooling";
     const residue = isResidue();
     const zeroed = !s.active || inWin || (residue && s.kind === "stab");
-    const rate = s.kind === "drain"
-      ? -S.config.drain_coef * w
-      : S.config.stab_coef * w * (s.context === "cognitive" ? -0.8 : 1);
+    const rate = slotRate(s);
     const live = s.active && slotMinutes(s.id) >= 1 ? hhmm(slotMinutes(s.id) * 60000).slice(0, 5) : "";
     const sub = [esc(s.trigger),
       s.context !== "any" ? (s.context === "mechanical" ? "механика" : "когнитивная") : "",
+      s.mode === "ambient" ? "фон" : "",
       live ? "идёт " + live : "",
       zeroed && s.active ? "не влияет" : ""].filter(Boolean).join(" · ");
-    const rateTxt = w > 0
-      ? (rate > 0 ? "+" : "−") + Math.abs(rate).toFixed(2) + "<i>пп/ч</i>"
-      : '<i>вес 0</i>';
+    const num = w > 0 ? (rate > 0 ? "+" : "−") + Math.abs(rate).toFixed(2) : "0.00";
 
     return '<div class="flow flow--' + s.kind + (s.active ? " is-on" : "") + '">' +
-      '<button type="button" class="flow-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '">' +
-        '<span class="flow-name">' + (s.kind === "drain" ? icon("down", 12) : icon("up", 12)) + esc(s.title) + "</span>" +
-        '<span class="flow-num' + (zeroed ? " is-off" : "") + '">' + rateTxt + "</span>" +
-        '<span class="flow-sub">' + sub + "</span>" +
-      "</button>" +
-      '<button type="button" class="flow-edit" data-edit="' + s.id + '" aria-label="Настроить слот «' + esc(s.title) + '»">' + icon("pencil", 15) + "</button>" +
-    "</div>";
+      '<button type="button" class="flow-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '"' +
+        ' aria-label="' + esc(s.title) + ": " + (s.active ? "включён" : "выключен") + '">' +
+        '<span class="flow-tile">' + (s.kind === "drain" ? icon("down", 14) : icon("up", 14)) + "</span>" +
+        '<span class="flow-body">' +
+          '<span class="flow-name">' + esc(s.title) + "</span>" +
+          '<span class="flow-sub">' + sub + "</span>" +
+        "</span>" +
+        '<span class="flow-num' + (zeroed ? " is-off" : "") + (w > 0 ? "" : " is-zero") + '">' + num + "<i>пп/ч</i></span>" +
+        '<span class="flow-switch" aria-hidden="true"><i></i></span>' +
+      "</button></div>";
+  }
+
+  function flowGroup(kind, title) {
+    const arr = S.slots.filter((s) => s.kind === kind);
+    if (!arr.length) return "";
+    const sum = arr.reduce((a, s) => a + slotLive(s), 0);
+    const tail = Math.abs(sum) < 0.005
+      ? "тишина"
+      : (sum > 0 ? "+" : "−") + Math.abs(sum).toFixed(2) + " пп/ч";
+    return '<div class="flow-group"><span>' + title + "</span>" +
+      '<span class="mono' + (Math.abs(sum) < 0.005 ? " is-off" : "") + '">' + tail + "</span></div>" +
+      arr.map(flowRow).join("");
   }
 
   function slotsBlock() {
+    const on = S.slots.filter((s) => s.active).length;
+    const sum = S.slots.reduce((a, s) => a + slotLive(s), 0);
+    const sign = sum > 0 ? "+" : "−";
     return '<section class="card"><div class="between"><h2 style="margin:0">Потоки</h2>' +
-      '<span class="chip">' + S.slots.filter((s) => s.active).length + " / " + S.slots.length + "</span></div>" +
-      '<p class="note">Тап включает и выключает, удержание — настройка. Включение потребителя списывает вход ' + S.config.entry_cost + " пп.</p>" +
-      '<div class="flows">' + S.slots.map(tile).join("") + "</div></section>";
+      '<span class="chip mono">' + on + " / " + S.slots.length + "</span></div>" +
+      '<div class="flows-topline"><span class="hint-mini">тап — включить, удержание — настройка</span>' +
+        '<b class="mono">' + (Math.abs(sum) < 0.005 ? "баланс ровный" : sign + Math.abs(sum).toFixed(2) + " пп/ч") + "</b></div>" +
+      '<div class="flows">' +
+        flowGroup("drain", "съедают") +
+        flowGroup("stab", "возвращают") +
+      "</div></section>";
   }
 
   function switchRow() {
@@ -1390,11 +1413,6 @@
         if (wane) wane.style.height = cur.toFixed(1) + "%";
         if (deep) deep.style.height = fut.toFixed(1) + "%";
       }
-    }
-    for (const s of S.slots) {
-      if (!s.active) continue;
-      const el = $("#tm-" + s.id);
-      if (el) el.textContent = liveTileText(s);
     }
     const sb = $("#sparkBox");
     if (sb) sb.outerHTML = sparkBlock();
