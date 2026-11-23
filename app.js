@@ -27,12 +27,12 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v38";
+  const BUILD = "et-v39";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
   const TAGS = ["Ремонт", "Аврал", "Недосып", "Отпуск", "Болезнь", "Высокий фоновый шум", "Много встреч"];
-  const TABS = [["home", "Состояние"], ["moment", "Момент"], ["capture", "Захват"], ["checkpoint", "Чекпоинт"], ["mirror", "Зеркало"]];
+  const TABS = [["home", "Состояние"], ["capture", "Захват"], ["checkpoint", "Чекпоинт"], ["mirror", "Зеркало"]];
 
   // ─────────────────────────────── состояние ───────────────────────────────
   const KEY = "et_state_v3";
@@ -65,7 +65,7 @@
         scout_end: null, scout_start: null, scout_pending: null,
         focus_start: null, last_work_end: null, emergency: false,
         work: { active: false, started_at: null, weight: 8, updated_at: null },
-        pause_day: null, pause_count: 0, sleep_override: null,
+        pause_day: null, pause_count: 0, sleep_override: null, sleep_last: null, morning: null,
         drain_start: null, drain_slot: null, pending_entry: false, merged: false,
         residue_until: null, last_entry_at: null,
         slot_on: {}, warned: {}, samples: []
@@ -170,21 +170,51 @@
   }
 
   // ─────────────────────────────── модель ───────────────────────────────
-  function sleepWindowHours() {
-    const a = toMin(S.config.sleep_from), b = toMin(S.config.sleep_to);
-    return round1((b > a ? b - a : 1440 - a + b) / 60);
+  function sleepWindowHours() { return sleepHours(S.config.sleep_from, S.config.sleep_to); }
+
+  function sleepHours(from, toTime) {
+    const a = toMin(from), b = toMin(toTime);
+    if (!isFinite(a) || !isFinite(b) || a === b) return 0;
+    const d = b > a ? b - a : 1440 - a + b;
+    return Math.round((d / 60) * 100) / 100;
+  }
+  function fmtDur(h) {
+    const m = Math.max(0, Math.round((Number(h) || 0) * 60));
+    return Math.floor(m / 60) + " ч " + String(m % 60).padStart(2, "0") + " мин";
+  }
+  function nextOccurrence(timeStr, afterTs) {
+    const a = toMin(timeStr);
+    const d = new Date(afterTs);
+    d.setHours(Math.floor(a / 60), a % 60, 0, 0);
+    if (d.getTime() <= afterTs) d.setDate(d.getDate() + 1);
+    return d.getTime();
   }
   function isNight() {
     const d = new Date(), cur = d.getHours() * 60 + d.getMinutes();
     const a = toMin(S.config.sleep_from), b = toMin(S.config.sleep_to);
     return a <= b ? (cur >= a && cur < b) : (cur >= a || cur < b);
   }
+  function sleepRef() {
+    const o = S.runtime.sleep_last;
+    if (!o || !o.from || !o.to) return null;
+    const at = Date.parse(o.at);
+    if (!isFinite(at)) return null;
+    const limit = Math.min(nextOccurrence(S.config.sleep_from, at + 8 * 3600e3), at + 30 * 3600e3);
+    return Date.now() <= limit ? o : null;
+  }
   function lastNightHours() {
-    const o = S.runtime.sleep_override;
-    if (o && Date.now() - Date.parse(o.at) < 36 * 3600e3) return Number(o.hours);
+    const o = sleepRef();
+    if (o) return sleepHours(o.from, o.to);
     return sleepWindowHours();
   }
-  function sleepFactor() { return clamp(lastNightHours() / (Number(S.config.sleep_target) || 7.5), 0, 1); }
+  function sleepFactorFrom(h, target) {
+    const t = Number(target) || 7.5;
+    if (!(h > 0)) return 0;
+    if (h >= t) return clamp(1 - Math.max(0, h - t - 1) * 0.05, 0.9, 1);
+    return clamp(h / t, 0, 1);
+  }
+  function sleepFactor() { return sleepFactorFrom(lastNightHours(), S.config.sleep_target); }
+
   function drainMult() { return 1 + (1 - sleepFactor()) * Number(S.config.sleep_drain_k || 0.5); }
   function workActive() { return !!(S.runtime.work && S.runtime.work.active); }
   function isResidue() { const u = S.runtime.residue_until; return !!(u && Date.now() < u); }
@@ -292,20 +322,28 @@
     if (S.runtime.base == null) return 100;
     return Math.max(S.runtime.base * sleepFactor(), S.runtime.battery || 0);
   }
+  function morningLevel() {
+    const m = S.runtime.morning;
+    return m && m.day === todayKey() ? clamp(Number(m.level) || 0, 0, 2) : 0;
+  }
+  function morningPenalty() { return [0, 5, 12][morningLevel()] || 0; }
+  function dayCeiling() { return Math.max(0, ceiling() - morningPenalty()); }
   function floorValue() { const f = Number(S.config.debt_floor); return isNaN(f) ? 0 : Math.min(0, f); }
 
-  function liveValue() {
+  function liveValueAt(ceil) {
     const r = S.runtime;
     if (r.base == null) return null;
     const b0 = r.battery == null ? r.base : r.battery;
     const dtH = Math.max(0, (Date.now() - Date.parse(r.battery_at)) / 3600000);
-    return clamp(b0 + rateOf() * dtH, floorValue(), ceiling());
+    return clamp(b0 + rateOf() * dtH, floorValue(), ceil == null ? ceiling() : ceil);
   }
+  function liveValue() { return liveValueAt(dayCeiling()); }
 
   function projection() {
     const v = liveValue(); if (v == null) return null;
-    return clamp(v + rateOf() * hoursToEvening().hours, 0, ceiling());
+    return clamp(v + rateOf() * hoursToEvening().hours, 0, dayCeiling());
   }
+
 
   function pushSample(v) {
     const arr = S.runtime.samples || (S.runtime.samples = []);
@@ -316,7 +354,7 @@
   }
 
   function accrue() {
-    const v = liveValue();
+    const v = liveValueAt(ceiling());
     if (v == null) return;
     S.runtime.battery = round1(v);
     S.runtime.battery_at = nowISO();
@@ -399,6 +437,7 @@
       '<h2 class="modal__title" id="modalTitle">' + esc(o.title || "") + "</h2>" +
       '<div class="modal__body">' + (o.html || "") + "</div>" +
       (o.fields || []).map((f) =>
+        f.type === "custom" ? "" :
         '<div class="field"><label for="mf_' + esc(f.key) + '">' + esc(f.label) + "</label>" +
         (f.type === "textarea"
           ? '<textarea id="mf_' + esc(f.key) + '" rows="3">' + esc(f.value || "") + "</textarea>"
@@ -418,6 +457,7 @@
     m.setAttribute("aria-hidden", "false");
     const read = () => { const out = {}; (o.fields || []).forEach((f) => { const el = $("#mf_" + f.key); out[f.key] = el ? el.value : ""; }); return out; };
     (o.actions || []).forEach((a, i) => { const b = $('[data-modal-act="' + i + '"]', box); if (b) b.onclick = () => { if (a.onClick) a.onClick(read()); }; });
+    if (o.after) o.after(box);
     const first = box.querySelector("input,textarea,button");
     if (first) first.focus();
     modalCleanup = () => { m.classList.remove("is-open"); m.setAttribute("aria-hidden", "true"); box.innerHTML = ""; };
@@ -514,12 +554,13 @@
         '<div class="row"><button type="button" class="primary" data-go="checkpoint">Сделать чекпоинт</button>' +
         '<button type="button" data-act="seed">Стартовый профиль</button></div></section>';
     }
-    const lv = levelOf(v), ceil = ceiling(), proj = projection(), ep = hoursToEvening();
+    const lv = levelOf(v), ceil = dayCeiling(), proj = projection(), ep = hoursToEvening();
     const f = sleepFactor();
     const cells = Array.from({ length: 10 }, (_, i) => {
       const cur = clamp((v - i * 10) / 10, 0, 1) * 100;
       const fut = clamp((proj - i * 10) / 10, 0, 1) * 100;
-      return '<span class="cell"><i class="wane" style="height:' + cur.toFixed(1) + '%"></i><i class="deep" style="height:' + fut.toFixed(1) + '%"></i></span>';
+      const locked = i * 10 >= ceil ? " is-locked" : "";
+      return '<span class="cell' + locked + '"><i class="wane" style="height:' + cur.toFixed(1) + '%"></i><i class="deep" style="height:' + fut.toFixed(1) + '%"></i></span>';
     }).join("");
     return '<section class="card hero" style="--lvl:' + lv.c1 + ';--lvl-2:' + lv.c2 + '">' +
       '<div class="hero-top"><div>' +
@@ -528,20 +569,19 @@
         '<div class="hero-sub" id="heroSpent">потрачено ' + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " пп</div>" +
       "</div><div id=\"heroBadge\">" + statusBadge(v) + "</div></div>" +
       '<div class="battery">' +
-        '<div class="bat-shell"><div class="bat-cells" id="batCells">' + cells + "</div>" +
-        '<div class="bat-ceil" id="batCeil" style="left:' + clamp(ceil, 0, 100).toFixed(1) + '%"></div></div>' +
+        '<div class="bat-shell"><div class="bat-cells" id="batCells">' + cells + "</div></div>" +
         '<div class="bat-nub"></div>' +
       "</div>" +
       '<div class="bars-axis"><span>0 %</span><b style="left:' + clamp(v, 0, 100).toFixed(1) + '%">сейчас</b><span>100 %</span></div>' +
       '<div class="legend">' +
         '<span><i class="lg lg--deep"></i>останется к вечеру</span>' +
         '<span><i class="lg lg--wane"></i>уйдёт</span>' +
-        '<span><i class="lg-ceil"></i>потолок ' + ceil.toFixed(1) + "%</span>" +
+        '<span><i class="lg lg--lock"></i>выше потолка</span>' +
         '<span class="live"><i class="dot"></i><span id="heroProj">' + proj.toFixed(1) + "</span>% " + ep.label.toLowerCase() + "</span>" +
       "</div>" +
       sparkBlock() +
-      '<div class="sleepline"><span>Сон <b class="mono">' + lastNightHours() + " ч</b> · потолок <b class=\"mono\">" +
-        Math.round(f * 100) + "%</b> · расход <b class=\"mono\">×" + drainMult().toFixed(2) + "</b></span>" +
+      '<div class="sleepline"><span>Сон <b class="mono">' + fmtDur(lastNightHours()) + "</b> · потолок <b class=\"mono\">" +
+        Math.round(f * 100) + "%" + (morningPenalty() ? " −" + morningPenalty() + " пп" : "") + '</b> · расход <b class="mono">×' + drainMult().toFixed(2) + "</b></span>" +
         '<button type="button" class="link" data-sheet="sleep">Изменить</button></div>' +
     "</section>" + formCard();
   }
@@ -580,18 +620,22 @@
 
   function workCard() {
     const w = S.runtime.work;
-    const wRate = -S.config.drain_coef * (Number(w.weight) || 0);
+    const weight = clamp(Number(w.weight) || 8, 1, 10);
+    const wRate = -S.config.drain_coef * weight;
     return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день</h2>' +
-      '<span class="chip">вес ' + w.weight + " · " + wRate.toFixed(2) + "</span></div>" +
+      '<span class="chip">' + wRate.toFixed(2) + " пп/ч</span></div>" +
       (w.active
         ? '<div class="switch-big"><div><div class="timer" id="workClock">' + hhmm(Date.now() - Date.parse(w.started_at)).slice(0, 5) + "</div>" +
           '<p class="note">Дорога входит в окно. За 10–11 часов ≈ ' + Math.abs(wRate * 10.5).toFixed(1) + " пп.</p></div></div>" +
-          '<div class="row"><button type="button" class="primary" data-act="work">Завершить день</button>' +
-          '<button type="button" class="sm" data-act="workWeight" aria-label="Вес рабочего дня">⚙</button></div>'
+          '<div class="row"><button type="button" class="primary" data-act="work">Завершить день</button></div>'
         : '<p class="dim">Работа и дорога тратят ресурс сами по себе.</p>' +
-          '<div class="row"><button type="button" class="primary" data-act="work">Начать рабочий день</button>' +
-          '<button type="button" class="sm" data-act="workWeight" aria-label="Вес рабочего дня">⚙</button></div>') +
-    "</section>";
+          '<div class="row"><button type="button" class="primary" data-act="work">Начать рабочий день</button></div>') +
+      '<div class="sld" style="margin-top:var(--s4)">' +
+        '<div class="sld-top"><label for="workW">тяжесть дня</label>' +
+          '<span class="sld-val"><b id="workW-v">' + weight + "</b></span></div>" +
+        '<input type="range" id="workW" min="1" max="10" step="1" value="' + weight + '" data-workw>' +
+        '<div class="hintline">Ровный день — 5, аврал — 9. Меняется на лету и пересчитывает остаток.</div>' +
+      "</div></section>";
   }
 
   function tile(s) {
@@ -661,12 +705,41 @@
 
   // ─────────────────────────────── экраны ───────────────────────────────
   let activeTab = "home";
-  let momentMode = "scout";
+
   let touchedSliders = new Set();
+
+  function journalCard() {
+    const r = S.runtime;
+    const live = !!(r.focus_start || r.scout_end || r.window_end);
+    const fLabel = r.focus_start ? "Фокус · " + hhmm(Date.now() - r.focus_start) : "Засечь фокус";
+    return '<section class="card card--tight"><div class="between">' +
+      '<div class="label">журнал дня</div>' +
+      '<span class="chip">' + timelineEvents().length + " соб.</span></div>" +
+      '<div class="row" style="margin:var(--s2) 0 var(--s3)">' +
+        '<button type="button" class="pill ' + (live ? "is-live" : "") + '" data-act="focus" id="focusPill"><span>' +
+          icon("bolt", 15) + " " + fLabel + "</span><span class=\"pill-meta\">" +
+          (r.focus_start ? "стоп" : "замер") + "</span></button></div>" +
+      timeline(6) +
+      '<div class="sleepline"><span>ёмкость внимания за неделю <b class="mono">' + avgFocus() + '</b></span></div>' +
+    "</section>";
+  }
+
+  function morningCard() {
+    const lv = morningLevel(), pen = morningPenalty();
+    const opts = [["чисто", 0], ["до 15 мин", 1], ["больше", 2]];
+    return '<section class="card card--tight"><div class="between">' +
+      '<div class="label">утро</div>' +
+      '<span class="chip">потолок ' + Math.round(dayCeiling()) + "%" +
+        (pen ? " · −" + pen + " пп" : "") + "</span></div>" +
+      '<div class="pick-row">' + opts.map(([l, v]) =>
+        '<button type="button" class="pick" data-morning="' + v + '" aria-pressed="' + (lv === v) + '">' + l + "</button>").join("") +
+      "</div>" +
+      '<p class="note" style="margin-top:var(--s3)">Залипание сразу после подъёма урезает потолок на сегодня. Не вина, а цена.</p></section>';
+  }
 
   function renderHome() {
     const r = S.runtime;
-    let h = heroBlock() + duoBlock() + protocolsRow() + workCard() + slotsBlock() + switchRow();
+    let h = heroBlock() + morningCard() + duoBlock() + protocolsRow() + workCard() + slotsBlock() + switchRow();
     if (r.scout_pending) {
       h += '<section class="card"><h2>Разведка завершена</h2><p class="dim">Продолжили работу после сигнала?</p>' +
         '<div class="row"><button type="button" class="primary" data-scout="yes">Продолжил</button>' +
@@ -677,7 +750,7 @@
         '<span class="mono" style="font-size:22px">' + hhmm(r.window_end - Date.now()) + "</span></div>" +
         '<div class="divider"></div><div class="hint"><span class="bar"></span><span>Начисление остановлено целиком. Окно возвращает к базе и снимает вину, но выше базы не поднимает.</span></div></section>';
     }
-    return h;
+    return h + journalCard();
   }
 
   function timelineEvents() {
@@ -696,8 +769,8 @@
     return ev;
   }
 
-  function timeline() {
-    const ev = timelineEvents().slice(0, 12);
+  function timeline(n) {
+    const ev = timelineEvents().slice(0, n || 12);
     if (!ev.length) return '<p class="note">Пока пусто. События появятся здесь по мере работы.</p>';
     return '<div class="timeline">' + ev.map((x) =>
       '<div class="tl-item"><span class="tl-time">' + fmtTime(x.at) + "</span>" +
@@ -717,49 +790,12 @@
       '<span class="clock-mm">' + (p[0] || "00") + '</span><span class="clock-ss">:' + (p[1] || "00") + "</span></div>";
   }
 
-  function renderMoment() {
-    const r = S.runtime;
-    const modes = [["scout", "Разведка"], ["focus", "Фокус"], ["window", "Окно"]];
-    let timer = "05:00", live = false, unit = "осталось", actionLabel = "Запустить разведку", actName = "scout",
-      hint = "Снять туман с одного квадрата. Через 5 минут можно бросить без стыда.";
-
-    if (momentMode === "scout") {
-      timer = r.scout_end ? hhmm(r.scout_end - Date.now()) : "05:00";
-      live = !!r.scout_end;
-      if (r.scout_end) { actionLabel = "Разведка идёт"; }
-    } else if (momentMode === "focus") {
-      timer = r.focus_start ? hhmm(Date.now() - r.focus_start) : "00:00";
-      live = !!r.focus_start;
-      unit = "уже идёт";
-      actionLabel = r.focus_start ? "Завершить подход" : "Запустить секундомер";
-      actName = "focus";
-      hint = "Секундомер вверх. Показывает реальную ёмкость внимания, а не норматив.";
-    } else {
-      timer = r.window_end ? hhmm(r.window_end - Date.now()) : "45:00";
-      live = !!r.window_end;
-      actionLabel = r.window_end ? "Окно открыто" : "Открыть окно 45 мин";
-      actName = "window";
-      hint = "Разрешённый отдых. Начисление остановлено целиком: ни расхода, ни восстановления.";
-    }
-
-    return '<div class="stack">' +
-      '<section class="card">' +
-        '<div class="tabs-text" role="group" aria-label="Режим таймера">' +
-          modes.map(([k, l]) => '<button type="button" data-mode="' + k + '" aria-pressed="' + (momentMode === k) + '">' + l + "</button>").join("") +
-        "</div>" +
-        '<div class="label">' + unit + "</div>" +
-        '<div id="modeClock">' + clockHTML(timer, live) + "</div>" +
-        '<p class="note" style="margin-top:var(--s3)">' + hint + "</p>" +
-        '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-act="' + actName + '"' +
-          ((actName === "scout" && r.scout_end) || (actName === "window" && r.window_end) ? " disabled" : "") + ">" + actionLabel + "</button></div>" +
-        '<div class="sleepline"><span>ёмкость внимания за неделю <b class="mono">' + avgFocus() + "</b></span></div>" +
-      "</section>" +
-      '<section class="card"><div class="between"><h2 style="margin:0">Журнал дня</h2>' +
-        '<span class="chip">' + timelineEvents().length + " соб.</span></div>" + timeline() + "</section></div>";
-  }
-
   function renderCapture() {
-    const items = S.captures.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    const items = S.captures.slice().sort((a, b) => {
+      const da = a.done_at ? 1 : 0, db = b.done_at ? 1 : 0;
+      if (da !== db) return da - db;
+      return a.created_at < b.created_at ? 1 : -1;
+    });
     const done = items.filter((c) => c.done_at).length;
     return '<div class="stack">' +
       '<section class="card"><div class="label">внешняя память</div>' +
@@ -774,7 +810,7 @@
       '<div style="margin-top:var(--s3)">' + (items.length
         ? items.map((c) => '<div class="item"><div class="between">' +
             '<span' + (c.done_at ? ' style="text-decoration:line-through;color:var(--mute)"' : "") + ">" + esc(c.text) + "</span>" +
-            '<button type="button" class="ghost sm" data-capdone="' + c.id + '">' + (c.done_at ? "Вернуть" : "Сброшено") + "</button></div>" +
+            '<button type="button" class="ghost sm" data-capdone="' + c.id + '">' + (c.done_at ? "Вернуть" : "Отметить") + "</button></div>" +
             '<div class="d">' + fmtDate(c.created_at) + " " + fmtTime(c.created_at) + "</div></div>").join("")
         : '<p class="note">Пока пусто. Одно касание кнопки «+» — и мысль выгружена.</p>') + "</div></section></div>";
   }
@@ -965,7 +1001,6 @@
     const v = $("#view");
     if (!v) return;
     v.innerHTML = activeTab === "home" ? renderHome()
-      : activeTab === "moment" ? renderMoment()
       : activeTab === "capture" ? renderCapture()
       : activeTab === "checkpoint" ? renderCheckpoint()
       : renderMirror();
@@ -979,18 +1014,8 @@
     if (wc && workActive() && S.runtime.work.started_at) {
       wc.textContent = hhmm(Date.now() - Date.parse(S.runtime.work.started_at)).slice(0, 5);
     }
-    if (activeTab !== "home") {
-      const mc = $("#modeClock");
-      if (mc && activeTab === "moment") {
-        const r = S.runtime;
-        let t = null;
-        if (momentMode === "scout" && r.scout_end) t = hhmm(r.scout_end - Date.now());
-        else if (momentMode === "focus" && r.focus_start) t = hhmm(Date.now() - r.focus_start);
-        else if (momentMode === "window" && r.window_end) t = hhmm(r.window_end - Date.now());
-        if (t) mc.innerHTML = clockHTML(t, true);
-      }
-      return;
-    }
+    if (activeTab !== "home") return;
+
     const val = $("#heroVal"); if (!val) return;
     const fv = $("#formVal");
     if (fv) fv.textContent = Math.round(formNow() * 100) + "%";
@@ -1017,9 +1042,6 @@
         if (deep) deep.style.height = fut.toFixed(1) + "%";
       }
     }
-    const ceilEl = $("#batCeil");
-    if (ceilEl) ceilEl.style.left = clamp(ceiling(), 0, 100).toFixed(1) + "%";
-
     for (const s of S.slots) {
       if (!s.active) continue;
       const el = $("#tm-" + s.id);
@@ -1067,30 +1089,128 @@
     save(); render(); toast("Эпизод записан: " + dur + " мин");
   }
 
+  const WHEEL_MINS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+  let sleepDraft = null;
+
+  function wheelHTML(t) {
+    const p = String(t || "00:00").split(":");
+    const hh = clamp(Number(p[0]) || 0, 0, 23);
+    const mm = clamp(Math.round((Number(p[1]) || 0) / 5) * 5, 0, 55);
+    const col = (unit, arr, cur) => '<div class="wheel-col" data-unit="' + unit + '">' +
+      arr.map((v) => '<button type="button" tabindex="-1" class="wheel-item' + (v === cur ? " is-on" : "") +
+        '" data-v="' + v + '">' + String(v).padStart(2, "0") + "</button>").join("") + "</div>";
+    return '<div class="wheel">' +
+      col("h", Array.from({ length: 24 }, (_, i) => i), hh) +
+      '<span class="wheel-colon">:</span>' +
+      col("m", WHEEL_MINS, mm) + "</div>";
+  }
+
   function openSleepSheet() {
+    const o = sleepRef();
+    sleepDraft = {
+      from: (o && o.from) || S.config.sleep_from,
+      to: (o && o.to) || S.config.sleep_to,
+      edit: "from"
+    };
     openModal({
-      title: "Сон",
-      html: "<p>Окно сна задаёт потолок восстановления и множитель расхода. Ниже цели потолок падает, а расход растёт.</p>",
+      title: "Прошлая ночь",
+      html: "<p>Отбой и подъём. Длительность считается сама и задаёт потолок дня.</p>" +
+        '<div class="seg" role="group" aria-label="Какое время меняется">' +
+          '<button type="button" data-sk="from" aria-pressed="true"><span>отбой</span><b class="mono">' + esc(sleepDraft.from) + "</b></button>" +
+          '<button type="button" data-sk="to" aria-pressed="false"><span>подъём</span><b class="mono">' + esc(sleepDraft.to) + "</b></button>" +
+        "</div>" +
+        '<div class="sleeppick"><div class="wheel-band" aria-hidden="true"></div><div id="sleepWheel"></div></div>' +
+        '<div class="sleep-dur" id="sleepDur"></div>' +
+        '<input type="hidden" id="mf_from" value="' + esc(sleepDraft.from) + '">' +
+        '<input type="hidden" id="mf_to" value="' + esc(sleepDraft.to) + '">',
       fields: [
-        { key: "from", label: "Отбой", value: S.config.sleep_from },
-        { key: "to", label: "Подъём", value: S.config.sleep_to },
-        { key: "target", label: "Цель, часов", type: "number", value: S.config.sleep_target },
-        { key: "slept", label: "Спал прошлой ночью, часов", type: "number", value: lastNightHours() }
+        { key: "from", type: "custom" },
+        { key: "to", type: "custom" },
+        { key: "target", label: "Цель сна, часов", type: "number", value: S.config.sleep_target }
       ],
+      after: bindSleepWheel,
       actions: [
         { label: "Отмена", onClick: closeModal },
-        { label: "Сохранить", kind: "primary", onClick: (v) => {
-            S.config.sleep_from = /^\d{1,2}:\d{2}$/.test(v.from) ? v.from : S.config.sleep_from;
-            S.config.sleep_to = /^\d{1,2}:\d{2}$/.test(v.to) ? v.to : S.config.sleep_to;
-            S.config.sleep_target = clamp(Number(v.target) || 7.5, 4, 12);
-            const h = Number(v.slept);
-            S.runtime.sleep_override = (!isNaN(h) && h >= 0) ? { hours: clamp(h, 0, 14), at: nowISO() } : null;
-            save(); closeModal(); render();
-            toast("Сон " + lastNightHours() + " ч · потолок " + Math.round(sleepFactor() * 100) + "%");
-          } }
+        { label: "Сохранить", kind: "primary", onClick: saveSleep }
       ]
     });
   }
+
+  function bindSleepWheel(box) {
+    const slot = $("#sleepWheel", box), durBox = $("#sleepDur", box);
+
+    const sync = () => {
+      const f = $("#mf_from"), t = $("#mf_to");
+      if (f) f.value = sleepDraft.from;
+      if (t) t.value = sleepDraft.to;
+      $$("[data-sk]", box).forEach((b) => {
+        b.setAttribute("aria-pressed", String(b.dataset.sk === sleepDraft.edit));
+        const val = $("b", b);
+        if (val) val.textContent = sleepDraft[b.dataset.sk];
+      });
+      const h = sleepHours(sleepDraft.from, sleepDraft.to);
+      if (durBox) durBox.innerHTML = fmtDur(h) + "<small>сна · потолок " +
+        Math.round(sleepFactorFrom(h, S.config.sleep_target) * 100) + "%</small>";
+    };
+
+    const setPart = (unit, v) => {
+      const p = String(sleepDraft[sleepDraft.edit]).split(":");
+      if (unit === "h") p[0] = String(v).padStart(2, "0");
+      else p[1] = String(v).padStart(2, "0");
+      sleepDraft[sleepDraft.edit] = p[0] + ":" + p[1];
+      sync();
+    };
+
+    const draw = () => {
+      slot.innerHTML = wheelHTML(sleepDraft[sleepDraft.edit]);
+      $$(".wheel-col", slot).forEach((c) => {
+        const items = $$(".wheel-item", c);
+        const ih = items[0] ? (items[0].getBoundingClientRect().height || 44) : 44;
+        const idx = items.findIndex((x) => x.classList.contains("is-on"));
+        c.scrollTop = Math.max(0, idx) * ih;
+        let timer = null;
+        c.onscroll = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            const i = clamp(Math.round(c.scrollTop / ih), 0, items.length - 1);
+            items.forEach((x, n) => x.classList.toggle("is-on", n === i));
+            setPart(c.dataset.unit, Number(items[i].dataset.v));
+          }, 110);
+        };
+        items.forEach((x, n) => {
+          x.onclick = () => {
+            items.forEach((y, k) => y.classList.toggle("is-on", k === n));
+            c.scrollTop = n * ih;
+            setPart(c.dataset.unit, Number(x.dataset.v));
+          };
+        });
+      });
+    };
+
+    $$("[data-sk]", box).forEach((b) => {
+      b.onclick = () => { sleepDraft.edit = b.dataset.sk; draw(); };
+    });
+    draw();
+    sync();
+  }
+
+  function saveSleep(v) {
+    const norm = (s, fb) => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+      if (!m) return fb;
+      return String(clamp(Number(m[1]), 0, 23)).padStart(2, "0") + ":" + String(clamp(Number(m[2]), 0, 59)).padStart(2, "0");
+    };
+    const from = norm(v.from, S.config.sleep_from), to = norm(v.to, S.config.sleep_to);
+    if (sleepHours(from, to) <= 0) { toast("Отбой и подъём совпадают — длительность не считается"); return; }
+    S.config.sleep_from = from;
+    S.config.sleep_to = to;
+    S.config.sleep_target = clamp(Number(v.target) || 7.5, 4, 12);
+    S.runtime.sleep_last = { from: from, to: to, at: nowISO() };
+    S.runtime.sleep_override = null;
+    save(); closeModal(); render();
+    toast("Сон " + fmtDur(lastNightHours()) + " · потолок " + Math.round(sleepFactor() * 100) + "%");
+  }
+
 
   function openCaptureSheet() {
     openModal({
@@ -1130,7 +1250,7 @@
     switch (name) {
       case "scout":
         r.scout_start = Date.now(); r.scout_end = Date.now() + S.config.scout_min * 60000;
-        momentMode = "scout"; save(); render(); toast("Разведка: " + S.config.scout_min + " мин"); break;
+        save(); render(); toast("Разведка: " + S.config.scout_min + " мин"); break;
       case "window": {
         if (r.window_day !== todayKey()) { r.window_day = todayKey(); r.window_count = 0; }
         r.window_count++;
@@ -2058,7 +2178,6 @@
     $$("[data-sheet]").forEach((b) => {
       b.onclick = () => { if (b.dataset.sheet === "sleep") openSleepSheet(); };
     });
-    $$("[data-mode]").forEach((b) => { b.onclick = () => { momentMode = b.dataset.mode; render(); }; });
     $$("[data-tog]").forEach((b) => {
       let lp = null;
       const longPress = () => { b.dataset.long = "1"; openEpisodeDialog(b.dataset.tog); };
@@ -2088,6 +2207,26 @@
       };
     });
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
+    $$("[data-morning]").forEach((b) => {
+      b.onclick = () => {
+        S.runtime.morning = { day: todayKey(), level: Number(b.dataset.morning) || 0 };
+        save(); render();
+        toast(morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный");
+      };
+    });
+    const workW = $("[data-workw]");
+    if (workW) {
+      const out = $("#workW-v");
+      const apply = (redraw) => {
+        const w = S.runtime.work;
+        w.weight = clamp(Number(workW.value) || 8, 1, 10);
+        w.updated_at = nowISO();
+        save();
+        if (redraw) render();
+      };
+      workW.oninput = () => { if (out) out.textContent = workW.value; };
+      workW.onchange = () => apply(true);
+    }
     $$("[data-scout]").forEach((b) => {
       b.onclick = () => {
         const p = S.runtime.scout_pending; if (!p) return;
