@@ -309,6 +309,17 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .db-prev{background:#4a5b6b}
 .db-cur{background:var(--lime)}
 
+.stat{display:grid;gap:8px}
+.stat-row{display:grid;grid-template-columns:44px 1fr 32px;align-items:center;gap:var(--s3)}
+.stat-day{font-family:var(--mono);font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.stat-track{display:block;height:8px;background:rgba(140,170,205,.12);border-radius:999px;overflow:hidden}
+.stat-fill{display:block;height:100%;border-radius:999px;background:var(--lime);min-width:0}
+.stat-fill--warm{background:var(--amber)}
+.stat-num{font-family:var(--mono);font-size:12px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+.stat-fill.ms{position:absolute;left:0;top:0;height:4px}
+.totals{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4) var(--s3)}
+.spark svg{display:block;width:100%;height:56px}
+
 /* ---------- тост ---------- */
 .toast{
   position:fixed;left:50%;bottom:calc(148px + env(safe-area-inset-bottom));transform:translateX(-50%);
@@ -480,6 +491,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
   box-shadow:var(--shadow-2),0 10px 24px -14px rgba(16,185,129,.55);transition:transform var(--t-fast),box-shadow var(--t-fast)
 }
 .fab:active{transform:scale(.96)}
+.fab.is-off{display:none}
 
 /* поля в шторках */
 .field{margin-bottom:var(--s2)}

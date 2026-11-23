@@ -28,12 +28,12 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v42";
+  const BUILD = "et-v44";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
   const TAGS = ["Ремонт", "Аврал", "Недосып", "Отпуск", "Болезнь", "Высокий фоновый шум", "Много встреч"];
-  const TABS = [["home", "Состояние"], ["capture", "Захват"], ["checkpoint", "Чекпоинт"], ["mirror", "Зеркало"]];
+  const TABS = [["home", "Состояние"], ["capture", "Захват"], ["checkpoint", "Чекпоинт"], ["stats", "Статистика"], ["mirror", "Зеркало"]];
 
   // ─────────────────────────────── состояние ───────────────────────────────
   const KEY = "et_state_v3";
@@ -50,7 +50,7 @@
         sleep_from: "23:00", sleep_to: "07:00", sleep_target: 7.5, sleep_drain_k: 0.5,
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
       },
-      checkpoints: [], quests: [], captures: [], sessions: [], interruptions: [],
+      checkpoints: [], checks: [], quests: [], captures: [], sessions: [], interruptions: [],
       sync: { clientId: "", token: "", lastSync: null, lastDevice: null, auto: true, lastError: null, mode: "gist", cmtSeen: -1, ghToken: "", gistId: "" },
       slots: [
         { id: uuid(), updated_at: nowISO(), kind: "drain", mode: "capture", title: "Новостные проверки", trigger: "в течение дня", weight: 8, context: "any", active: true, replaces: null },
@@ -81,7 +81,7 @@
     p.runtime = Object.assign(d.runtime, p.runtime || {});
     p.sync = Object.assign(d.sync, p.sync || {});
     p.runtime.work = Object.assign({ active: false, started_at: null, weight: 8 }, p.runtime.work || {});
-    for (const k of ["checkpoints", "quests", "captures", "sessions", "interruptions", "slots"]) {
+    for (const k of ["checkpoints", "checks", "quests", "captures", "sessions", "interruptions", "slots"]) {
       p[k] = Array.isArray(p[k]) ? p[k] : [];
       p[k] = p[k].filter((r) => r && typeof r === "object").map((r) =>
         Object.assign({ updated_at: r.updated_at || r.date || r.started_at || r.declared_at || r.created_at || nowISO() }, r));
@@ -106,7 +106,7 @@
 
   function countRecords(s) {
     if (!s) return 0;
-    return (s.checkpoints || []).length + (s.captures || []).length + (s.sessions || []).length +
+    return (s.checkpoints || []).length + (s.checks || []).length + (s.captures || []).length + (s.sessions || []).length +
       (s.quests || []).length + (s.interruptions || []).length;
   }
   function hasData(s) {
@@ -911,6 +911,26 @@
   function suggestUnstructured(e) { return e == null ? null : e >= 7 ? 9 : e >= 4 ? 7 : e >= 2 ? 5 : 3; }
   function suggestFocus(avg) { return avg == null ? null : avg >= 40 ? 8 : avg >= 20 ? 7 : avg >= 10 ? 5 : 3; }
 
+  function checksBlock() {
+    const all = (S.checks || []).slice().sort((a, b) => (String(a.at || "") < String(b.at || "") ? 1 : -1));
+    if (!all.length) return "";
+    const shown = all.slice(0, 4);
+    return '<section class="card"><div class="between"><div class="label">локальные чеки</div>' +
+      '<span class="chip">' + all.length + " шт.</span></div>" +
+      '<p class="note">Состояние на момент замера. Цикл не двигают и заряд не трогают.</p>' +
+      '<div style="margin-top:var(--s2)">' + shown.map((c, i) => {
+        const prev = shown[i + 1];
+        const d = prev && prev.base != null && c.base != null ? round1(c.base - prev.base) : null;
+        const dtxt = d == null || d === 0 ? "" : (d > 0 ? "+" : "") + d.toFixed(1);
+        const sub = ["заряд " + (c.battery == null ? "—" : c.battery.toFixed(1) + "%")];
+        if (c.note) sub.push(c.note.length > 60 ? c.note.slice(0, 60) + "…" : c.note);
+        return '<div class="item"><div class="between">' +
+          "<span>" + fmtDate(c.at) + " " + fmtTime(c.at) + " · " + (c.base == null ? "—" : c.base.toFixed(1) + "%") + "</span>" +
+          (dtxt ? '<span class="chip">' + dtxt + " пп</span>" : "") +
+          '</div><div class="d">' + esc(sub.join(" · ")) + "</div></div>";
+      }).join("") + "</div></section>";
+  }
+
   function renderCheckpoint() {
     touchedSliders = new Set();
     const cps = S.checkpoints.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -958,6 +978,8 @@
     }
     h += "</section>";
 
+    h += checksBlock();
+
     h += '<section class="card"><div class="label">' + (last ? "точка сохранения" : "первая точка") + "</div>" +
       '<h2 style="margin:var(--s2) 0 var(--s3)">Ресурс</h2>' +
       '<p class="note">Состояние на сегодня, не оценка. Дельта — к прошлому чекпоинту. Шаг ползунка — 1.75 пп базы.</p>' +
@@ -985,7 +1007,10 @@
     h += '<section class="card"><div class="label">новая база</div>' +
       '<div id="basePreview" style="margin-top:var(--s2)"><span class="big" id="basePreviewVal">—</span>' +
       '<div class="note" id="basePrevNote">до сохранения точки</div></div>' +
-      '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-act="saveCP">Сохранить точку</button></div></section>';
+      '<div class="row" style="margin-top:var(--s4)"><button type="button" data-act="saveCheck">Локальный чек</button></div>' +
+      '<p class="hintline">Запомнить состояние на сейчас. Цикл не сдвигает, заряд не обнуляет.</p>' +
+      '<div class="row" style="margin-top:var(--s4)"><button type="button" class="primary" data-act="saveCP">Сохранить точку</button></div>' +
+      '<p class="hintline">Полный чекпоинт: новая база, заряд с нуля, следующий день цикла.</p></section>';
 
     if (last && prev) {
       h += '<section class="card"><div class="between"><h2 style="margin:0">Патч-ноут</h2>' +
@@ -993,6 +1018,170 @@
         '<p class="note">' + fmtDate(prev.date) + " → " + fmtDate(last.date) + "</p>" +
         '<div class="patch">' + patchBody(patchNote(prev, last)) + "</div>" +
         (last.note ? '<div class="divider"></div><p class="note">Заметка периода: ' + esc(last.note) + "</p>" : "") + "</section>";
+    }
+    return h;
+  }
+
+  const STATS_DAYS = 14;
+
+  function cap(s) {
+    const t = String(s || "");
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+  }
+
+  function localDayKey(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function statsWindow(days) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const rows = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const t = start.getTime() - i * 864e5, d = new Date(t);
+      rows.push({
+        key: localDayKey(t),
+        label: String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0"),
+        intr: 0, entry: 0, focus: 0, focusN: 0, work: 0, workN: 0, window: 0, scout: 0, marks: 0
+      });
+    }
+    const map = new Map(rows.map((r) => [r.key, r]));
+    const rowOf = (iso) => {
+      const t = Date.parse(iso || "");
+      return isNaN(t) ? null : map.get(localDayKey(t));
+    };
+    for (const x of S.interruptions || []) {
+      const r = rowOf(x.started_at);
+      if (!r) continue;
+      r.intr++;
+      if (x.entry_charged) r.entry += S.config.entry_cost;
+    }
+    for (const x of S.sessions || []) {
+      const r = rowOf(x.started_at);
+      if (!r) continue;
+      const m = Number(x.duration_min) || 0;
+      if (x.type === "focus") { r.focus += m; r.focusN++; }
+      else if (x.type === "work") { r.work += m; r.workN++; }
+      else if (x.type === "window") r.window++;
+      else if (x.type === "scout") r.scout++;
+    }
+    for (const hk of S.runtime.hook_log || []) {
+      if (hk.on !== true) continue;
+      const r = rowOf(hk.at);
+      if (r) r.marks++;
+    }
+    return rows;
+  }
+
+  function barRow(label, value, max, kind) {
+    const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+    return '<div class="stat-row"><span class="stat-day">' + label + "</span>" +
+      '<span class="stat-track"><span class="stat-fill' + (kind ? " stat-fill--" + kind : "") + '" style="width:' + pct.toFixed(1) + '%"></span></span>' +
+      '<span class="stat-num">' + value + "</span></div>";
+  }
+
+  function baseSpark(days) {
+    const from = Date.now() - days * 864e5;
+    const pts = [];
+    for (const c of S.checkpoints || []) {
+      if (c.base_battery != null && Date.parse(c.date) >= from) pts.push({ t: Date.parse(c.date), v: c.base_battery });
+    }
+    for (const c of S.checks || []) {
+      if (c.base != null && Date.parse(c.at) >= from) pts.push({ t: Date.parse(c.at), v: c.base });
+    }
+    pts.sort((a, b) => a.t - b.t);
+    if (pts.length < 2) return "";
+    const vs = pts.map((p) => p.v);
+    const lo = Math.min.apply(null, vs) - 2, hi = Math.max.apply(null, vs) + 2;
+    const W = 300, H = 56, pad = 6;
+    const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+    const X = (t) => pad + (W - pad * 2) * ((t - t0) / Math.max(1, t1 - t0));
+    const Y = (v) => H - pad - (H - pad * 2) * ((v - lo) / Math.max(0.1, hi - lo));
+    const d = pts.map((p, i) => (i ? "L" : "M") + X(p.t).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ");
+    return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-hidden="true">' +
+      '<path d="' + d + '" fill="none" stroke="var(--lime)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  }
+
+  function renderStats() {
+    const rows = statsWindow(STATS_DAYS);
+    const tot = rows.reduce((a, r) => {
+      a.intr += r.intr; a.entry += r.entry; a.focus += r.focus; a.focusN += r.focusN;
+      a.work += r.work; a.workN += r.workN; a.window += r.window; a.scout += r.scout; a.marks += r.marks;
+      return a;
+    }, { intr: 0, entry: 0, focus: 0, focusN: 0, work: 0, workN: 0, window: 0, scout: 0, marks: 0 });
+
+    let h = '<section class="card"><div class="between"><div class="label">статистика</div>' +
+      '<span class="chip">' + STATS_DAYS + " дней</span></div>" +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Что было на самом деле</h2>' +
+      '<p class="note">Считается по журналу, а не по памяти. Пустой день — это отсутствие записей, а не ноль.</p></section>';
+
+    if (!tot.intr && !tot.focusN && !tot.workN && !tot.marks && !tot.window && !tot.scout) {
+      return h + '<section class="card"><div class="label">пока пусто</div>' +
+        '<p class="note" style="margin-top:var(--s2)">Статистика появится, когда в журнале будут переключения, сессии фокуса или метки с датчика.</p></section>';
+    }
+
+    h += '<section class="card"><div class="label">итоги</div>' +
+      '<div class="totals" style="margin-top:var(--s4)">' +
+        '<div><div class="label">переключений</div><div class="big">' + tot.intr + "</div></div>" +
+        '<div><div class="label">минут входа</div><div class="big">' + round1(tot.entry) + "</div></div>" +
+        '<div><div class="label">фокус и работа</div><div class="big">' + round1((tot.focus + tot.work) / 60) + "<small>ч</small></div></div>" +
+        '<div><div class="label">меток залипания</div><div class="big">' + tot.marks + "</div></div>" +
+      "</div></section>";
+
+    const maxIntr = Math.max(1, ...rows.map((r) => r.intr));
+    h += '<section class="card"><div class="between"><div class="label">переключения</div>' +
+      '<span class="chip">' + tot.intr + " шт.</span></div>" +
+      '<p class="note">Каждый вход стоит ' + S.config.entry_cost + " пп. Входы ближе " + S.config.merge_gap_min + " минут считаются одним.</p>" +
+      '<div class="stat" style="margin-top:var(--s3)">' +
+      rows.map((r) => barRow(r.label, r.intr, maxIntr, "")).join("") + "</div></section>";
+
+    const maxMarks = Math.max(1, ...rows.map((r) => r.marks));
+    h += '<section class="card"><div class="between"><div class="label">метки</div>' +
+      '<span class="chip">' + tot.marks + " шт.</span></div>" +
+      '<p class="note">Срабатывания датчиков: ПК-правила и Ярлыки. Метка — это включение слота, а не минуты.</p>' +
+      '<div class="stat" style="margin-top:var(--s3)">' +
+      rows.map((r) => barRow(r.label, r.marks, maxMarks, "warm")).join("") + "</div></section>";
+
+    const bySlot = new Map();
+    for (const hk of S.runtime.hook_log || []) {
+      if (hk.on === true) bySlot.set(hk.h, (bySlot.get(hk.h) || 0) + 1);
+    }
+    if (bySlot.size) {
+      const list = Array.from(bySlot.entries()).sort((a, b) => b[1] - a[1]);
+      const top = list[0][1];
+      h += '<section class="card"><div class="label">по слотам</div>' +
+        '<div class="dumbbell" style="margin-top:var(--s3)">' + list.map(([k, v]) =>
+          '<div class="db-row"><div class="db-head"><span class="db-name">' + esc(cap(hookLabel(k))) + "</span>" +
+          '<span class="db-val">' + v + "</span></div>" +
+          '<div class="db-track"><span class="stat-fill ms" style="width:' + (v / top * 100).toFixed(1) + '%"></span></div></div>').join("") +
+        "</div></section>";
+    }
+
+    const proto = [
+      ["Окно 45 минут", tot.window, null],
+      ["Разведка 5 минут", tot.scout, null],
+      ["Сессии фокуса", tot.focusN, tot.focus],
+      ["Рабочий день", tot.workN, tot.work]
+    ].filter((r) => r[1] > 0);
+    if (proto.length) {
+      h += '<section class="card"><div class="between"><div class="label">протоколы</div>' +
+        '<span class="chip">' + (tot.window + tot.scout + tot.focusN + tot.workN) + " шт.</span></div>" +
+        '<div style="margin-top:var(--s2)">' + proto.map((r) =>
+          '<div class="item"><div class="between"><span>' + r[0] + "</span>" +
+          '<span class="stat-num">' + r[1] + " " + plural(r[1], ["раз", "раза", "раз"]) + "</span></div>" +
+          (r[2] ? '<div class="d">' + Math.round(r[2]) + " мин всего</div>" : "") + "</div>").join("") +
+        "</div></section>";
+    }
+
+    const spark = baseSpark(STATS_DAYS);
+    const checksIn = (S.checks || []).filter((c) => c.base != null && Date.parse(c.at) >= Date.now() - STATS_DAYS * 864e5);
+    if (spark || checksIn.length) {
+      h += '<section class="card"><div class="between"><div class="label">база</div>' +
+        '<span class="chip">' + (S.runtime.base == null ? "нет" : S.runtime.base + "%") + "</span></div>" +
+        (spark ? '<div class="spark" style="margin-top:var(--s3)">' + spark + "</div>" : "") +
+        '<p class="note">' + (checksIn.length ? "по " + checksIn.length + " " + plural(checksIn.length, ["локальному чеку", "локальным чекам", "локальным чекам"]) : "точек мало") +
+        " · кривая калибровочная</p></section>";
     }
     return h;
   }
@@ -1068,8 +1257,11 @@
     v.innerHTML = activeTab === "home" ? renderHome()
       : activeTab === "capture" ? renderCapture()
       : activeTab === "checkpoint" ? renderCheckpoint()
+      : activeTab === "stats" ? renderStats()
       : renderMirror();
     bind();
+    const fab = $("#fabBtn");
+    if (fab) fab.classList.toggle("is-off", activeTab === "stats");
     if (activeTab === "checkpoint") updateBasePreview();
     updateLive();
     painted = true;
@@ -1400,6 +1592,7 @@
         save(); render(); toast("Квест объявлен"); break;
       }
       case "saveCP": saveCheckpoint(); break;
+      case "saveCheck": saveCheck(); break;
       case "export": exportFile(); break;
       case "seed": seed(); break;
       case "diag": showDiag(); break;
@@ -1450,7 +1643,7 @@
     }
   }
 
-  function saveCheckpoint() {
+  function readCheckForm() {
     const stats = {}, debuffs = {};
     $$("[data-slider]").forEach((el) => {
       const [g, k] = el.dataset.slider.split(":");
@@ -1462,9 +1655,14 @@
     const m = $("#behMin"), n = $("#behNews");
     if (m && m.value) beh.minutes_to_phone = Number(m.value);
     if (n && n.value) beh.news_checks = Number(n.value);
+    return { stats, debuffs, behaviors: beh, tags, note: noteEl ? noteEl.value.trim() : "" };
+  }
+
+  function saveCheckpoint() {
+    const f = readCheckForm();
     const cp = {
       id: uuid(), updated_at: nowISO(), version_tag: "v1." + S.checkpoints.length, date: nowISO(),
-      stats, debuffs, behaviors: beh, tags, note: noteEl ? noteEl.value.trim() : "",
+      stats: f.stats, debuffs: f.debuffs, behaviors: f.behaviors, tags: f.tags, note: f.note,
       quest_id: (S.quests.find((q) => q.status === "active") || {}).id || null
     };
     cp.base_battery = baseFrom(cp);
@@ -1478,6 +1676,22 @@
     save();
     activeTab = "mirror"; render();
     toast("Точка сохранения: база " + cp.base_battery + "%");
+  }
+
+  function saveCheck() {
+    const f = readCheckForm();
+    if (!Object.keys(f.stats).length) { toast("Нет данных формы"); return; }
+    const at = nowISO();
+    const check = {
+      id: uuid(), updated_at: at, at: at,
+      stats: f.stats, debuffs: f.debuffs, behaviors: f.behaviors, tags: f.tags, note: f.note,
+      base: baseFrom(f), battery: S.runtime.battery
+    };
+    S.checks.push(check);
+    if (S.checks.length > 200) S.checks = S.checks.slice(-200);
+    save();
+    render();
+    toast("Чек записан: " + (check.base == null ? "—" : check.base + "%") + " · цикл не сдвинут");
   }
 
   function seed() {
@@ -1656,7 +1870,7 @@
     const out = JSON.parse(JSON.stringify(a));
     const skew = (((b.sync && b.sync.clock_offset) || 0) - ((a.sync && a.sync.clock_offset) || 0));
     const at = (iso, shift) => (Date.parse(iso || 0) || 0) + (shift || 0);
-    for (const key of ["checkpoints", "quests", "captures", "sessions", "interruptions"]) {
+    for (const key of ["checkpoints", "checks", "quests", "captures", "sessions", "interruptions"]) {
       const map = new Map();
       for (const r of out[key] || []) map.set(r.id, r);
       for (const r of b[key] || []) {
@@ -2024,7 +2238,7 @@
 
   function recordsKey(st) {
     const part = (arr) => (arr || []).map((r) => r.id + ":" + (r.updated_at || "")).sort().join(",");
-    return ["checkpoints", "captures", "quests", "sessions", "interruptions", "slots"]
+    return ["checkpoints", "checks", "captures", "quests", "sessions", "interruptions", "slots"]
       .map((k) => part(st[k])).join("|");
   }
 
