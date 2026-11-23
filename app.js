@@ -16,6 +16,11 @@
     if (min < 60) return min + " мин";
     return Math.floor(min / 60) + " ч " + String(min % 60).padStart(2, "0") + " мин";
   };
+  const hmBig = (ms) => {
+    const min = Math.max(0, Math.round(ms / 60000));
+    if (min < 60) return String(min) + "<span>мин</span>";
+    return Math.floor(min / 60) + " ч " + String(min % 60).padStart(2, "0") + "<span>мин</span>";
+  };
   const hhmm = (ms) => { const m = Math.max(0, Math.round(ms / 1000)); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
   const toMin = (t) => { const p = String(t || "0:0").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -35,7 +40,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v47";
+  const BUILD = "et-v48";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -730,15 +735,21 @@
     });
   }
 
+  function ppBig(v, unit) {
+    return (v > 0 ? "+" : "−") + Math.abs(v).toFixed(2) + "<span>" + unit + "</span>";
+  }
+
   function workCard() {
     const w = S.runtime.work;
     const weight = clamp(Number(w.weight) || 8, 1, 10);
     const wRate = -S.config.drain_coef * weight;
     return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день</h2>' +
-      '<span class="chip">' + wRate.toFixed(2) + " пп/ч</span></div>" +
+      '<span class="chip">' + (w.active ? "идёт" : "не начат") + "</span></div>" +
+      '<div class="hero-num hero-num--card" id="workRate">' + ppBig(wRate, "пп/ч") + "</div>" +
+      '<div class="hero-sub" id="workRateSub">≈ ' + Math.abs(wRate * 10.5).toFixed(1) + " пп за 10 ч 30 мин</div>" +
       (w.active
-        ? '<div class="switch-big"><div><div class="timer" id="workClock">' + fmtHm(Date.now() - Date.parse(w.started_at)) + "</div>" +
-          '<p class="note">Дорога входит в окно. За 10–11 часов ≈ ' + Math.abs(wRate * 10.5).toFixed(1) + " пп.</p></div></div>" +
+        ? '<div class="switch-big"><div><div class="timer" id="workClock">' + hmBig(Date.now() - Date.parse(w.started_at)) + "</div>" +
+          '<p class="note">Дорога входит в окно.</p></div></div>' +
           '<div class="row"><button type="button" class="primary" data-act="work">Завершить день</button></div>'
         : '<p class="dim">Работа и дорога тратят ресурс сами по себе.</p>' +
           '<div class="row"><button type="button" class="primary" data-act="work">Начать рабочий день</button></div>') +
@@ -1439,7 +1450,7 @@
   function updateLive() {
     const wc = $("#workClock");
     if (wc && workActive() && S.runtime.work.started_at) {
-      wc.textContent = fmtHm(Date.now() - Date.parse(S.runtime.work.started_at));
+      wc.innerHTML = hmBig(Date.now() - Date.parse(S.runtime.work.started_at));
     }
     if (activeTab !== "home") return;
 
@@ -2732,7 +2743,12 @@
         save();
         if (redraw) render();
       };
-      workW.oninput = () => { if (out) out.textContent = workW.value; };
+      workW.oninput = () => {
+        if (out) out.textContent = workW.value;
+        const rate = -S.config.drain_coef * clamp(Number(workW.value) || 8, 1, 10);
+        const rv = $("#workRate"); if (rv) rv.innerHTML = ppBig(rate, "пп/ч");
+        const rs = $("#workRateSub"); if (rs) rs.textContent = "≈ " + Math.abs(rate * 10.5).toFixed(1) + " пп за 10 ч 30 мин";
+      };
       workW.onchange = () => apply(true);
     }
     $$("[data-scout]").forEach((b) => {

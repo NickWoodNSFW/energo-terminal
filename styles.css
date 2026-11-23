@@ -260,7 +260,8 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .tabs button[aria-selected="true"]{color:var(--lime);background:rgba(226,241,99,.1)}
 
 /* ---------- прочее ---------- */
-.timer{font-family:var(--mono);font-size:44px;line-height:1;margin:var(--s3) 0 var(--s4);color:var(--txt)}
+.timer{font-family:var(--display);font-weight:900;font-size:38px;line-height:.95;letter-spacing:-.02em;margin:var(--s4) 0 var(--s1);color:var(--txt)}
+.timer span{font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--mute);margin-left:4px}
 .timer--idle{color:var(--mute)}
 .tabs-text{display:flex;gap:var(--s5);margin-bottom:var(--s4)}
 .tabs-text button{position:relative;min-height:44px;padding:0 2px;background:none;border:none;
@@ -381,6 +382,8 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .hero-num{font-family:var(--display);font-weight:900;font-size:64px;line-height:.9;letter-spacing:-.02em;white-space:nowrap}
 .hero-num span{font-size:20px;color:var(--dim);margin-left:2px}
 .hero-num--empty{color:var(--mute);font-size:44px;letter-spacing:0}
+.hero-num--card{margin-top:var(--s2)}
+.hero-num--card span{margin-left:6px;font-size:18px}
 .hero-sub{font-family:var(--mono);font-size:13px;color:var(--mute);margin-top:var(--s1)}
 
 .badge{
@@ -432,7 +435,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 
 /* работа */
 .switch-big{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap}
-.switch-big .timer{font-size:34px;margin:var(--s2) 0}
+.switch-big .timer{font-size:38px;margin:var(--s3) 0 var(--s1)}
 
 /* потоки — карточка строк с тумблером */
 .flows-topline{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin-top:var(--s1)}
