@@ -354,7 +354,7 @@
     if (w.getTime() > ts) w.setDate(w.getDate() - 1);
     return w.getTime();
   }
-  function autoMorningLevel() {
+  function morningMarks() {
     const wake = wakeMoment(Date.now());
     const to = wake + 90 * 60000;
     let n = 0;
@@ -363,6 +363,10 @@
       const t = Date.parse(e.at);
       if (t >= wake && t <= to) n++;
     }
+    return n;
+  }
+  function autoMorningLevel() {
+    const n = morningMarks();
     return n >= 2 ? 2 : n === 1 ? 1 : 0;
   }
   function morningManual() {
@@ -755,6 +759,7 @@
   let activeTab = "home";
 
   let touchedSliders = new Set();
+  let morningOpen = false;
 
   function marksBlock() {
     const counts = hookCounts();
@@ -787,16 +792,31 @@
   function morningCard() {
     const lv = morningLevel(), pen = morningPenalty();
     const manual = morningManual();
+    const n = morningMarks();
     const opts = [["чисто", 0], ["до 15 мин", 1], ["больше", 2]];
-    const src = manual ? "отмечено вручную" : "по меткам";
-    return '<section class="card card--tight"><div class="between">' +
-      '<div class="label">утро</div>' +
+    const head = '<div class="between"><div class="label">утро</div>' +
       '<span class="chip">потолок ' + Math.round(dayCeiling()) + "%" +
-        (pen ? " · −" + pen + " пп" : "") + "</span></div>" +
+      (pen ? " · −" + pen + " пп" : "") + "</span></div>";
+
+    if (n > 0 && !manual && !morningOpen) {
+      return '<section class="card card--tight">' + head +
+        '<div class="between" style="margin-top:var(--s2)">' +
+        '<span class="note" style="margin:0">' + cap(opts[lv][0]) + " · по " + n + " " +
+          plural(n, ["метке", "меткам", "меткам"]) + " за первые 90 минут</span>" +
+        '<button type="button" class="link" data-act="morningEdit">поправить</button></div></section>';
+    }
+
+    const hint = manual
+      ? "Отмечено вручную. Тап по выбранному варианту возвращает назад к меткам."
+      : n > 0
+        ? "Датчик дал " + n + " " + plural(n, ["метку", "метки", "меток"]) + " за первые 90 минут. Можно поправить, если залипал вне отслеживаемых приложений."
+        : "Меток за первые 90 минут нет — датчик молчал: ПК был выключен или Ярлыки не сработали. Пока ничего не выбрано, утро считается чистым.";
+
+    return '<section class="card card--tight">' + head +
       '<div class="pick-row">' + opts.map(([l, v]) =>
         '<button type="button" class="pick" data-morning="' + v + '" aria-pressed="' + (lv === v) + '">' + l + "</button>").join("") +
       "</div>" +
-      '<p class="note" style="margin-top:var(--s3)">Залипание сразу после подъёма урезает потолок на сегодня. Считается по меткам за первые 90 минут; тап по выбранному варианту возвращает назад к меткам (' + src + ").</p></section>";
+      '<p class="note" style="margin-top:var(--s3)">' + hint + "</p></section>";
   }
 
   function renderHome() {
@@ -1242,7 +1262,7 @@
     if (!box) return;
     box.innerHTML = TABS.map(([k, l]) =>
       '<button type="button" role="tab" aria-selected="' + (k === activeTab) + '" data-tab="' + k + '">' + l + "</button>").join("");
-    $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; render(); }; });
+    $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; morningOpen = false; render(); }; });
   }
 
   let painted = false;
@@ -2534,10 +2554,13 @@
         const lv = Number(b.dataset.morning) || 0;
         const already = morningManual() && morningLevel() === lv;
         S.runtime.morning = already ? null : { day: todayKey(), level: lv, manual: true };
+        morningOpen = false;
         save(); render();
         toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный"));
       };
     });
+    const mEdit = $('[data-act="morningEdit"]');
+    if (mEdit) mEdit.onclick = () => { morningOpen = true; render(); };
     const workW = $("[data-workw]");
     if (workW) {
       const out = $("#workW-v");
