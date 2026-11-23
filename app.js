@@ -35,7 +35,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v46";
+  const BUILD = "et-v47";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -273,6 +273,7 @@
   function formMult() { return clamp(1 + 0.9 * (1 - formNow()), 1, 1.8); }
 
   const FORM_FROM = 7, FORM_TO = 23, FORM_H = 56;
+  const DIP_FROM = 12, DIP_TO = 17;
 
   function formMarkerX(ts) {
     const d = new Date(ts), h = d.getHours() + d.getMinutes() / 60;
@@ -303,7 +304,7 @@
       const y = FORM_H - v * FORM_H;
       pts.push({ x: x, y: y });
       if (v > best.v) best = { v: v, h: h };
-      if (v < worst.v) worst = { v: v, h: h };
+      if (h >= DIP_FROM && h <= DIP_TO && v < worst.v) worst = { v: v, h: h };
     }
     const line = smoothD(pts);
     const nx = formMarkerX(Date.now()).toFixed(1);
@@ -423,6 +424,19 @@
   function projection() {
     const v = liveValue(); if (v == null) return null;
     return clamp(v + rateOf() * hoursToEvening().hours, 0, dayCeiling());
+  }
+
+  function projectionRaw() {
+    const v = liveValue(); if (v == null) return null;
+    return v + rateOf() * hoursToEvening().hours;
+  }
+
+  function projDelta(before, after) {
+    if (before == null || after == null) return "";
+    const b = Math.round(before), a = Math.round(after);
+    if (b === a) return " · к вечеру без изменений";
+    return " · к вечеру " + (a < 0 ? "−" : "") + Math.abs(a) + "% вместо " +
+      (b < 0 ? "−" : "") + Math.abs(b) + "%";
   }
 
 
@@ -764,7 +778,7 @@
       zeroed && s.active ? "не влияет" : ""].filter(Boolean).join(" · ");
     const num = w > 0 ? (rate > 0 ? "+" : "−") + Math.abs(rate).toFixed(2) : "0.00";
 
-    return '<div class="flow flow--' + s.kind + (s.active ? " is-on" : "") + '">' +
+    return '<div class="flow flow--' + s.kind + (s.active ? " is-on" : "") + (s.id === toggledId ? " is-just" : "") + '">' +
       '<button type="button" class="flow-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '"' +
         ' aria-label="' + esc(s.title) + ": " + (s.active ? "включён" : "выключен") + '">' +
         '<span class="flow-tile">' + (s.kind === "drain" ? icon("down", 14) : icon("up", 14)) + "</span>" +
@@ -835,6 +849,9 @@
 
   // ─────────────────────────────── экраны ───────────────────────────────
   let activeTab = "home";
+
+  let toggledId = null;
+  let lastHeroVal = null;
 
   let touchedSliders = new Set();
 
@@ -1376,7 +1393,47 @@
     if (fab) fab.classList.toggle("is-off", activeTab === "stats");
     if (activeTab === "checkpoint") updateBasePreview();
     updateLive();
+    animateHero();
+    toggledId = null;
     painted = true;
+  }
+
+  function buzz(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  function animateHero() {
+    if (activeTab !== "home") return;
+    const el = $("#heroVal");
+    const v = liveValue();
+    if (!el || v == null) { lastHeroVal = v; return; }
+    const from = lastHeroVal;
+    lastHeroVal = v;
+    if (from == null || Math.abs(v - from) < 0.005) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    flashDelta(v - from, el);
+    const t0 = performance.now(), dur = 460;
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      el.innerHTML = (from + (v - from) * e).toFixed(2) + "<span>%</span>";
+      if (k < 1) requestAnimationFrame(step);
+      else el.innerHTML = v.toFixed(2) + "<span>%</span>";
+    };
+    requestAnimationFrame(step);
+  }
+
+  function flashDelta(d, anchor) {
+    const card = anchor.closest(".hero");
+    if (!card) return;
+    const old = card.querySelector(".delta");
+    if (old) old.remove();
+    const chip = document.createElement("span");
+    chip.className = "delta" + (d > 0 ? " is-plus" : "");
+    chip.textContent = (d > 0 ? "+" : "−") + Math.abs(d).toFixed(2) + " пп";
+    card.appendChild(chip);
+    setTimeout(() => chip.remove(), 1200);
   }
 
   function updateLive() {
@@ -1617,12 +1674,12 @@
     switch (name) {
       case "scout":
         r.scout_start = Date.now(); r.scout_end = Date.now() + S.config.scout_min * 60000;
-        save(); render(); toast("Разведка: " + S.config.scout_min + " мин"); break;
+        buzz(10); save(); render(); toast("Разведка: " + S.config.scout_min + " мин"); break;
       case "window": {
         if (r.window_day !== todayKey()) { r.window_day = todayKey(); r.window_count = 0; }
         r.window_count++;
         r.window_start = Date.now(); r.window_end = Date.now() + S.config.legit_window_min * 60000;
-        r.status = "cooling"; save(); render();
+        r.status = "cooling"; buzz(10); save(); render();
         toast(r.window_count > S.config.legit_window_limit ? "Окно сверх лимита: фиксируется как автопилот" : "Окно открыто");
         break;
       }
@@ -1680,6 +1737,7 @@
         if (r.pause_day !== todayKey()) { r.pause_day = todayKey(); r.pause_count = 0; }
         if (r.pause_count >= S.config.micro_pause_limit) { toast("Лимит микропауз на сегодня: " + S.config.micro_pause_limit); return; }
         if (!chargeBattery(-S.config.micro_pause)) return;
+        buzz(10);
         r.pause_count++; save(); render();
         toast("Микропауза +" + S.config.micro_pause + " пп · " + r.pause_count + " из " + S.config.micro_pause_limit);
         break;
@@ -1916,14 +1974,14 @@
             const sel = document.querySelector('input[name="rp"]:checked');
             if (!sel) return;
             const s = cands[Number(sel.value)];
-            const before = projection();
+            const before = projectionRaw();
             if (s.replaces && s.replaces !== drainId) { const o = S.slots.find((x) => x.id === s.replaces); if (o) o.active = true; }
             drain.active = false;
             s.replaces = drainId; s.active = true;
             drain.updated_at = nowISO(); s.updated_at = nowISO();
             save(); closeModal(); render();
-            const after = projection();
-            toast("Замена: " + s.title + (before != null && after != null ? " · к 23:00 " + Math.round(after) + "% вместо " + Math.round(before) + "%" : ""));
+            const after = projectionRaw();
+            toast("Замена: " + s.title + projDelta(before, after));
           } }
       ]
     });
@@ -2614,7 +2672,7 @@
     });
     $$("[data-tog]").forEach((b) => {
       let lp = null;
-      const longPress = () => { b.dataset.long = "1"; openEpisodeDialog(b.dataset.tog); };
+      const longPress = () => { b.dataset.long = "1"; editSlot(b.dataset.tog); };
       b.addEventListener("pointerdown", () => { clearTimeout(lp); lp = setTimeout(longPress, 600); });
       ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
         b.addEventListener(ev, () => { if (lp) { clearTimeout(lp); lp = null; } }));
@@ -2622,7 +2680,7 @@
       b.onclick = () => {
         if (b.dataset.long) { delete b.dataset.long; return; }
         const s = S.slots.find((x) => x.id === b.dataset.tog);
-        const before = projection();
+        const before = projectionRaw();
         s.active = !s.active; s.updated_at = nowISO();
         if (!S.runtime.slot_on) S.runtime.slot_on = {};
         if (!S.runtime.warned) S.runtime.warned = {};
@@ -2634,10 +2692,12 @@
         }
         save();
         const charged = s.active && s.kind === "drain" && s.mode !== "ambient" ? chargeEntry() : false;
-        const after = projection(); render();
+        toggledId = s.id;
+        buzz(s.active ? 14 : 8);
+        const after = projectionRaw(); render();
         toast(s.title + ": " + (s.active ? "включён" : "выключен") +
           (charged ? " · вход −" + S.config.entry_cost : (s.active && s.mode === "ambient" ? " · фон, без входа" : "")) +
-          (before != null && after != null ? " · к 23:00 " + Math.round(after) + "% вместо " + Math.round(before) + "%" : ""));
+          projDelta(before, after));
       };
     });
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
