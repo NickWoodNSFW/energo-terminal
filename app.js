@@ -14,6 +14,7 @@
   const toMin = (t) => { const p = String(t || "0:0").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round1 = (v) => Math.round(v * 10) / 10;
+  const round2 = (v) => Math.round(v * 100) / 100;
   const todayKey = () => new Date().toISOString().slice(0, 10);
   const ICONS = {
     bolt: '<path d="M13 2 5 13h5l-1 9 8-11h-5l1-9z"/>',
@@ -27,7 +28,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v39";
+  const BUILD = "et-v40";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -60,7 +61,7 @@
         { id: uuid(), updated_at: nowISO(), kind: "stab", mode: null, title: "Пустой слот", trigger: "своё", weight: 0, context: "any", active: false, replaces: null }
       ],
       runtime: {
-        base: null, battery: null, battery_at: nowISO(), cp_at: null, status: "active",
+        base: null, battery: null, battery_at: nowISO(), cp_at: null, status: "active", updated_at: nowISO(),
         window_end: null, window_start: null, window_day: null, window_count: 0,
         scout_end: null, scout_start: null, scout_pending: null,
         focus_start: null, last_work_end: null, emergency: false,
@@ -163,6 +164,7 @@
         if (!opts || opts.sync !== false) scheduleSync();
         return;
       }
+      if (S.runtime) S.runtime.updated_at = nowISO();
       localStorage.setItem(KEY, JSON.stringify(S));
       if (S.checkpoints.length > 0) localStorage.setItem(BACKUP_KEY, JSON.stringify(S));
     } catch (e) { toast("Не удалось сохранить: хранилище заполнено"); }
@@ -224,14 +226,22 @@
 
   function circadianAt(ts) {
     const d = new Date(ts), h = d.getHours() + d.getMinutes() / 60;
-    for (let i = 1; i < CIRCADIAN.length; i++) {
+    const n = CIRCADIAN.length;
+    for (let i = 1; i < n; i++) {
       if (h <= CIRCADIAN[i][0]) {
-        const a = CIRCADIAN[i - 1], b = CIRCADIAN[i];
-        const k = (h - a[0]) / ((b[0] - a[0]) || 1);
-        return a[1] + (b[1] - a[1]) * k;
+        const p0 = CIRCADIAN[Math.max(0, i - 2)], p1 = CIRCADIAN[i - 1];
+        const p2 = CIRCADIAN[i], p3 = CIRCADIAN[Math.min(n - 1, i + 1)];
+        const span = (p2[0] - p1[0]) || 1;
+        const t = (h - p1[0]) / span;
+        const m1 = ((p2[1] - p0[1]) / ((p2[0] - p0[0]) || 1)) * span;
+        const m2 = ((p3[1] - p1[1]) / ((p3[0] - p1[0]) || 1)) * span;
+        const t2 = t * t, t3 = t2 * t;
+        const v = (2 * t3 - 3 * t2 + 1) * p1[1] + (t3 - 2 * t2 + t) * m1 +
+          (-2 * t3 + 3 * t2) * p2[1] + (t3 - t2) * m2;
+        return clamp(v, 0, 1);
       }
     }
-    return CIRCADIAN[CIRCADIAN.length - 1][1];
+    return CIRCADIAN[n - 1][1];
   }
 
   function wakeAt(ts) {
@@ -262,15 +272,29 @@
     return clamp(((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240, 0, 240);
   }
 
+  function smoothD(pts) {
+    if (!pts.length) return "";
+    let d = "M" + pts[0].x.toFixed(1) + "," + pts[0].y.toFixed(1);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      d += " C" + c1x.toFixed(1) + "," + c1y.toFixed(1) + " " + c2x.toFixed(1) + "," + c2y.toFixed(1) +
+        " " + p2.x.toFixed(1) + "," + p2.y.toFixed(1);
+    }
+    return d;
+  }
+
   function formCard() {
     const pts = [];
-    for (let h = FORM_FROM; h <= FORM_TO; h += 0.5) {
+    for (let h = FORM_FROM; h <= FORM_TO; h += 0.25) {
       const d = new Date();
       d.setHours(Math.floor(h), Math.round((h - Math.floor(h)) * 60), 0, 0);
       const x = ((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240;
       const y = FORM_H - formAt(d.getTime()) * FORM_H;
-      pts.push(x.toFixed(1) + "," + y.toFixed(1));
+      pts.push({ x: x, y: y });
     }
+    const line = smoothD(pts);
     const nx = formMarkerX(Date.now()).toFixed(1);
     const ny = (FORM_H - formNow() * FORM_H).toFixed(1);
     const ticks = [10, 14, 18, 22].map((h) =>
@@ -280,8 +304,8 @@
         '<span class="chip mono"><b id="formVal">' + Math.round(formNow() * 100) + '%</b> · ×<span id="formMul">' + formMult().toFixed(2) + "</span></span></div>" +
       '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус усталость. Чем ниже форма, тем дороже то же залипание — вечером расход выше, чем утром.</p>' +
       '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="72" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
-        '<polyline points="' + pts.join(" ") + " 240," + FORM_H + " 0," + FORM_H + '" style="fill:rgba(22,19,31,.10);stroke:none" />' +
-        '<polyline points="' + pts.join(" ") + '" fill="none" stroke="rgba(22,19,31,.55)" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />' +
+        '<path d="' + line + " L240," + FORM_H + " L0," + FORM_H + ' Z" style="fill:rgba(22,19,31,.10);stroke:none" />' +
+        '<path d="' + line + '" fill="none" stroke="rgba(22,19,31,.55)" stroke-width="1.5" stroke-linecap="round" vector-effect="non-scaling-stroke" />' +
         '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="#16131f" stroke-width="1" stroke-opacity=".5" />' +
         '<circle id="formDot" cx="' + nx + '" cy="' + ny + '" r="3" fill="#16131f" />' +
       "</svg>" +
@@ -356,7 +380,7 @@
   function accrue() {
     const v = liveValueAt(ceiling());
     if (v == null) return;
-    S.runtime.battery = round1(v);
+    S.runtime.battery = round2(v);
     S.runtime.battery_at = nowISO();
     pushSample(v);
     save();
@@ -392,7 +416,7 @@
     if (r.base == null) { toast("Сначала нужен чекпоинт: без базы заряд не считается"); return false; }
     accrue();
     const v = pp < 0 ? Math.min(ceiling(), r.battery - pp) : r.battery - pp;
-    r.battery = round1(clamp(v, floorValue(), 100));
+    r.battery = round2(clamp(v, floorValue(), 100));
     r.battery_at = nowISO();
     pushSample(r.battery);
     save();
@@ -994,12 +1018,15 @@
     $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; render(); }; });
   }
 
+  let painted = false;
+
   function render() {
     renderTabs();
     accrue();
     tick();
     const v = $("#view");
     if (!v) return;
+    if (document.body) document.body.dataset.paint = painted ? "ready" : "first";
     v.innerHTML = activeTab === "home" ? renderHome()
       : activeTab === "capture" ? renderCapture()
       : activeTab === "checkpoint" ? renderCheckpoint()
@@ -1007,6 +1034,7 @@
     bind();
     if (activeTab === "checkpoint") updateBasePreview();
     updateLive();
+    painted = true;
   }
 
   function updateLive() {
@@ -1603,22 +1631,25 @@
     const newest = (arr, shift) => Math.max(0, ...(arr || []).map((s) => at(s.updated_at, shift)));
     out.slots = newest(b.slots, skew) > newest(a.slots, 0) ? b.slots : a.slots;
     out.config = Object.assign({}, a.config, b.config);
-    if (at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0)) {
-      out.runtime = Object.assign({}, a.runtime, { base: b.runtime.base, battery: b.runtime.battery, battery_at: b.runtime.battery_at });
-    }
-    if (a.runtime.battery != null && b.runtime.battery != null && Math.abs(a.runtime.battery - b.runtime.battery) > 0.3) {
-      const newer = at(b.runtime.battery_at, skew) > at(a.runtime.battery_at, 0) ? b.runtime.battery_at : a.runtime.battery_at;
-      out.runtime = Object.assign({}, out.runtime, { battery: round1((a.runtime.battery + b.runtime.battery) / 2), battery_at: newer });
-    }
+    // Состояние дня берём целиком у того устройства, которое менялось позже:
+    // иначе заряд считается по разным входным данным (slot_on, утро, сон) и расходится.
+    const ra = at((a.runtime && a.runtime.updated_at) || a.runtime.battery_at, 0);
+    const rb = at((b.runtime && b.runtime.updated_at) || b.runtime.battery_at, skew);
+    const pick = rb > ra ? b.runtime : a.runtime;
+    const samples = (a.runtime.samples || []).slice();
+    out.runtime = Object.assign({}, a.runtime, JSON.parse(JSON.stringify(pick)));
+    out.runtime.samples = samples;
+    out.runtime.updated_at = pick.updated_at || a.runtime.updated_at;
     const wa = at(a.runtime.work && a.runtime.work.updated_at, 0);
     const wb = at(b.runtime.work && b.runtime.work.updated_at, skew);
     if (wb > wa) {
-      out.runtime = Object.assign({}, out.runtime, { work: JSON.parse(JSON.stringify(b.runtime.work)) });
+      out.runtime.work = JSON.parse(JSON.stringify(b.runtime.work));
     }
-    const ra = at(a.runtime.last_entry_at, 0);
-    const rb = at(b.runtime.last_entry_at, skew);
-    if (rb > ra) {
-      out.runtime = Object.assign({}, out.runtime, { last_entry_at: b.runtime.last_entry_at, residue_until: b.runtime.residue_until });
+    const ea = at(a.runtime.last_entry_at, 0);
+    const eb = at(b.runtime.last_entry_at, skew);
+    if (eb > ea) {
+      out.runtime.last_entry_at = b.runtime.last_entry_at;
+      out.runtime.residue_until = b.runtime.residue_until;
     }
     const cpsAll = (out.checkpoints || []).slice().sort((x, y) => (String(x.date || "") < String(y.date || "") ? -1 : 1));
     const cpNew = cpsAll[cpsAll.length - 1];
@@ -1830,7 +1861,7 @@
         if (hrs > 0.01) {
           const cur = liveValue();
           if (cur != null) {
-            S.runtime.battery = round1(clamp(cur + ratePerH * hrs, floorValue(), ceiling()));
+            S.runtime.battery = round2(clamp(cur + ratePerH * hrs, floorValue(), ceiling()));
             S.runtime.battery_at = nowISO();
           }
         }
@@ -1840,7 +1871,7 @@
         if (hrs > 0.01) {
           const cur = liveValue();
           if (cur != null) {
-            S.runtime.battery = round1(clamp(cur - ratePerH * hrs, floorValue(), ceiling()));
+            S.runtime.battery = round2(clamp(cur - ratePerH * hrs, floorValue(), ceiling()));
             S.runtime.battery_at = nowISO();
           }
         }
@@ -1929,7 +1960,9 @@
       "|w:" + (w.updated_at || "") + (w.active ? "1" : "0") + ":" + (w.started_at || "") +
       "|e:" + (r.last_entry_at || "") +
       "|b:" + (r.base == null ? "" : r.base) +
-      "|c:" + (r.cp_at || "");
+      "|c:" + (r.cp_at || "") +
+      "|r:" + (r.updated_at || "") +
+      "|v:" + (r.battery == null ? "" : r.battery) + "@" + (r.battery_at || "");
   }
 
   async function mergeRemote() {
