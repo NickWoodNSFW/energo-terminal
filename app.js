@@ -28,7 +28,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v40";
+  const BUILD = "et-v42";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -68,7 +68,7 @@
         work: { active: false, started_at: null, weight: 8, updated_at: null },
         pause_day: null, pause_count: 0, sleep_override: null, sleep_last: null, morning: null,
         drain_start: null, drain_slot: null, pending_entry: false, merged: false,
-        residue_until: null, last_entry_at: null,
+        residue_until: null, last_entry_at: null, hook_log: [],
         slot_on: {}, warned: {}, samples: []
       }
     };
@@ -346,9 +346,33 @@
     if (S.runtime.base == null) return 100;
     return Math.max(S.runtime.base * sleepFactor(), S.runtime.battery || 0);
   }
+  function wakeMoment(ts) {
+    const o = sleepRef();
+    const a = toMin((o && o.to) || S.config.sleep_to);
+    const w = new Date(ts);
+    w.setHours(Math.floor(a / 60), a % 60, 0, 0);
+    if (w.getTime() > ts) w.setDate(w.getDate() - 1);
+    return w.getTime();
+  }
+  function autoMorningLevel() {
+    const wake = wakeMoment(Date.now());
+    const to = wake + 90 * 60000;
+    let n = 0;
+    for (const e of S.runtime.hook_log || []) {
+      if (!e.on) continue;
+      const t = Date.parse(e.at);
+      if (t >= wake && t <= to) n++;
+    }
+    return n >= 2 ? 2 : n === 1 ? 1 : 0;
+  }
+  function morningManual() {
+    const m = S.runtime.morning;
+    return !!(m && m.day === todayKey() && m.manual);
+  }
   function morningLevel() {
     const m = S.runtime.morning;
-    return m && m.day === todayKey() ? clamp(Number(m.level) || 0, 0, 2) : 0;
+    if (morningManual()) return clamp(Number(m.level) || 0, 0, 2);
+    return autoMorningLevel();
   }
   function morningPenalty() { return [0, 5, 12][morningLevel()] || 0; }
   function dayCeiling() { return Math.max(0, ceiling() - morningPenalty()); }
@@ -732,6 +756,17 @@
 
   let touchedSliders = new Set();
 
+  function marksBlock() {
+    const counts = hookCounts();
+    const keys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    if (!keys.length) return "";
+    return '<div class="marks"><div class="between" style="margin-bottom:var(--s2)">' +
+      '<span class="label">метки за день</span>' +
+      '<span class="chip">' + keys.reduce((a, h) => a + counts[h], 0) + " шт.</span></div>" +
+      keys.map((h) => '<span class="mark-chip"><b class="mono">' + counts[h] + "</b> " + esc(hookLabel(h)) + "</span>").join("") +
+      "</div>";
+  }
+
   function journalCard() {
     const r = S.runtime;
     const live = !!(r.focus_start || r.scout_end || r.window_end);
@@ -744,13 +779,16 @@
           icon("bolt", 15) + " " + fLabel + "</span><span class=\"pill-meta\">" +
           (r.focus_start ? "стоп" : "замер") + "</span></button></div>" +
       timeline(6) +
+      marksBlock() +
       '<div class="sleepline"><span>ёмкость внимания за неделю <b class="mono">' + avgFocus() + '</b></span></div>' +
     "</section>";
   }
 
   function morningCard() {
     const lv = morningLevel(), pen = morningPenalty();
+    const manual = morningManual();
     const opts = [["чисто", 0], ["до 15 мин", 1], ["больше", 2]];
+    const src = manual ? "отмечено вручную" : "по меткам";
     return '<section class="card card--tight"><div class="between">' +
       '<div class="label">утро</div>' +
       '<span class="chip">потолок ' + Math.round(dayCeiling()) + "%" +
@@ -758,7 +796,7 @@
       '<div class="pick-row">' + opts.map(([l, v]) =>
         '<button type="button" class="pick" data-morning="' + v + '" aria-pressed="' + (lv === v) + '">' + l + "</button>").join("") +
       "</div>" +
-      '<p class="note" style="margin-top:var(--s3)">Залипание сразу после подъёма урезает потолок на сегодня. Не вина, а цена.</p></section>';
+      '<p class="note" style="margin-top:var(--s3)">Залипание сразу после подъёма урезает потолок на сегодня. Считается по меткам за первые 90 минут; тап по выбранному варианту возвращает назад к меткам (' + src + ").</p></section>";
   }
 
   function renderHome() {
@@ -1839,6 +1877,41 @@
     return String((s && s.hook) || "").toLowerCase().split(/[\s,;]+/).filter(Boolean);
   }
 
+  function logHook(hook, on, atMs) {
+    const log = S.runtime.hook_log || (S.runtime.hook_log = []);
+    log.push({ h: hook, on: !!on, at: new Date(atMs || Date.now()).toISOString() });
+    S.runtime.hook_log = log.slice(-400);
+  }
+
+  function hookCounts(dayKey) {
+    const key = dayKey || todayKey();
+    const out = {};
+    for (const e of S.runtime.hook_log || []) {
+      if (!e.on || String(e.at).slice(0, 10) !== key) continue;
+      out[e.h] = (out[e.h] || 0) + 1;
+    }
+    return out;
+  }
+
+  const HOOK_NAMES = {
+    yt: "YouTube", youtube: "YouTube", ig: "Instagram", instagram: "Instagram",
+    news: "новости", shorts: "shorts", tg: "Telegram", telegram: "Telegram",
+    reels: "reels", tt: "TikTok", tiktok: "TikTok", vk: "VK", vkvideo: "VK Видео",
+    game: "игры", games: "игры", mail: "почта",
+  };
+
+  function hookLabel(h) {
+    const s = S.slots.find((x) => hookList(x).indexOf(h) >= 0);
+    if (s && s.title) return s.title;
+    const key = String(h).toLowerCase();
+    const m = key.match(/^([a-zа-яё]+)(\d*)$/);
+    if (!m) return key.toUpperCase();
+    const name = HOOK_NAMES[m[1]];
+    if (!name) return key.toUpperCase();
+    return m[2] ? name + " " + m[2] : name;
+  }
+
+
   function applyHookEvent(hook, on, atMs) {
     const targets = S.slots.filter((s) => hookList(s).indexOf(hook) >= 0);
     if (!targets.length) return false;
@@ -1885,7 +1958,9 @@
     const m = String(body || "").trim().toLowerCase().match(/^([a-zа-я0-9_-]+)\s*[: ]\s*(on|off|вкл|выкл)$/);
     if (!m) return false;
     const on = m[2] === "on" || m[2] === "вкл";
-    return applyHookEvent(m[1], on, atMs);
+    logHook(m[1], on, atMs);
+    applyHookEvent(m[1], on, atMs);
+    return true;
   }
 
   async function processHooks() {
@@ -2242,9 +2317,11 @@
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
     $$("[data-morning]").forEach((b) => {
       b.onclick = () => {
-        S.runtime.morning = { day: todayKey(), level: Number(b.dataset.morning) || 0 };
+        const lv = Number(b.dataset.morning) || 0;
+        const already = morningManual() && morningLevel() === lv;
+        S.runtime.morning = already ? null : { day: todayKey(), level: lv, manual: true };
         save(); render();
-        toast(morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный");
+        toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный"));
       };
     });
     const workW = $("[data-workw]");
