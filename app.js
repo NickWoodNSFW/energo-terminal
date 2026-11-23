@@ -10,6 +10,12 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
   const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+  const fmtClock = (ms) => new Date(ms).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const fmtHm = (ms) => {
+    const min = Math.max(0, Math.round(ms / 60000));
+    if (min < 60) return min + " мин";
+    return Math.floor(min / 60) + " ч " + String(min % 60).padStart(2, "0") + " мин";
+  };
   const hhmm = (ms) => { const m = Math.max(0, Math.round(ms / 1000)); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
   const toMin = (t) => { const p = String(t || "0:0").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -22,13 +28,14 @@
     leaf: '<path d="M5 19c0-8 5-13 14-13 0 9-5 14-13 14"/><path d="M5 19c3-4 6-6 10-7"/>',
     down: '<path d="M12 5v14"/><path d="m6 13 6 6 6-6"/>',
     up: '<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',
-    pencil: '<path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="m14 6 4 4"/>'
+    pencil: '<path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="m14 6 4 4"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>'
   };
   function icon(name, size) {
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v44";
+  const BUILD = "et-v45";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -287,31 +294,53 @@
 
   function formCard() {
     const pts = [];
+    let best = { v: -1, h: FORM_FROM }, worst = { v: 2, h: FORM_FROM };
     for (let h = FORM_FROM; h <= FORM_TO; h += 0.25) {
       const d = new Date();
       d.setHours(Math.floor(h), Math.round((h - Math.floor(h)) * 60), 0, 0);
+      const v = formAt(d.getTime());
       const x = ((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240;
-      const y = FORM_H - formAt(d.getTime()) * FORM_H;
+      const y = FORM_H - v * FORM_H;
       pts.push({ x: x, y: y });
+      if (v > best.v) best = { v: v, h: h };
+      if (v < worst.v) worst = { v: v, h: h };
     }
     const line = smoothD(pts);
     const nx = formMarkerX(Date.now()).toFixed(1);
     const ny = (FORM_H - formNow() * FORM_H).toFixed(1);
-    const ticks = [10, 14, 18, 22].map((h) =>
+    const at = (h) => xd(h);
+    const ticks = [8, 12, 16, 20].map((h) =>
       '<span style="left:' + (((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 100).toFixed(2) + '%">' + h + ":00</span>").join("");
+    const grid = [8, 12, 16, 20].map((h) =>
+      '<line x1="' + (((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240).toFixed(1) + '" y1="0" x2="' +
+        (((h - FORM_FROM) / (FORM_TO - FORM_FROM)) * 240).toFixed(1) + '" y2="' + FORM_H +
+        '" stroke="#16131f" stroke-opacity=".12" vector-effect="non-scaling-stroke"/>').join("");
     return '<section class="card card--ink">' +
-      '<div class="between"><h2 style="margin:0">Форма дня</h2>' +
-        '<span class="chip mono"><b id="formVal">' + Math.round(formNow() * 100) + '%</b> · ×<span id="formMul">' + formMult().toFixed(2) + "</span></span></div>" +
-      '<p class="dim" style="margin:8px 0 10px;font-size:13px">Суточный ритм минус усталость. Чем ниже форма, тем дороже то же залипание — вечером расход выше, чем утром.</p>' +
-      '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="72" preserveAspectRatio="none" aria-hidden="true" style="display:block">' +
-        '<path d="' + line + " L240," + FORM_H + " L0," + FORM_H + ' Z" style="fill:rgba(22,19,31,.10);stroke:none" />' +
-        '<path d="' + line + '" fill="none" stroke="rgba(22,19,31,.55)" stroke-width="1.5" stroke-linecap="round" vector-effect="non-scaling-stroke" />' +
-        '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="#16131f" stroke-width="1" stroke-opacity=".5" />' +
-        '<circle id="formDot" cx="' + nx + '" cy="' + ny + '" r="3" fill="#16131f" />' +
-      "</svg>" +
-      '<div class="ink-axis">' + ticks + "</div>" +
-      '<p class="note" style="margin-top:6px">Спад после обеда и к вечеру — часть ритма, а не сбой. Кривая калибровочная.</p>' +
+      '<div class="form-top"><div><span class="label">форма дня</span>' +
+        '<div class="form-big" id="formVal">' + Math.round(formNow() * 100) + "<small>%</small></div></div>" +
+        '<div class="form-mult"><span>расход</span><b class="mono">×<span id="formMul">' + formMult().toFixed(2) + "</span></b></div></div>" +
+      '<div class="form-chart">' +
+        '<svg viewBox="0 0 240 ' + FORM_H + '" width="100%" height="76" preserveAspectRatio="none" aria-hidden="true">' +
+          grid +
+          '<path d="' + line + " L240," + FORM_H + " L0," + FORM_H + ' Z" style="fill:rgba(22,19,31,.09);stroke:none" />' +
+          '<path d="' + line + '" fill="none" stroke="rgba(22,19,31,.62)" stroke-width="1.5" stroke-linecap="round" vector-effect="non-scaling-stroke" />' +
+          '<line id="formNow" x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + FORM_H + '" stroke="#16131f" stroke-width="1" stroke-opacity=".45" stroke-dasharray="3 3" />' +
+          '<circle id="formDot" cx="' + nx + '" cy="' + ny + '" r="3.4" fill="#16131f" />' +
+        "</svg>" +
+        '<div class="ink-axis">' + ticks + "</div>" +
+      "</div>" +
+      '<div class="form-facts">' +
+        '<div><span class="ff-k">пик</span><b class="mono">' + at(best.h) + " · " + Math.round(best.v * 100) + "%</b></div>" +
+        '<div><span class="ff-k">провал</span><b class="mono">' + at(worst.h) + " · " + Math.round(worst.v * 100) + "%</b></div>" +
+        '<div><span class="ff-k">сейчас</span><b class="mono" id="formNowTxt">' + fmtClock(Date.now()) + "</b></div>" +
+      "</div>" +
+      '<p class="note" style="margin-top:var(--s3)">Чем ниже форма, тем дороже тот же расход. Кривая калибровочная.</p>' +
       "</section>";
+  }
+
+  function xd(h) {
+    const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+    return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
   }
 
   function slotMinutes(id) {
@@ -633,41 +662,68 @@
       "</div>" +
       sparkBlock() +
       '<div class="sleepline"><span>Сон <b class="mono">' + fmtDur(lastNightHours()) + "</b> · потолок <b class=\"mono\">" +
-        Math.round(f * 100) + "%" + (morningPenalty() ? " −" + morningPenalty() + " пп" : "") + '</b> · расход <b class="mono">×' + drainMult().toFixed(2) + "</b></span>" +
+        Math.round(f * 100) + "%</b> · расход <b class=\"mono\">×" + drainMult().toFixed(2) + "</b></span>" +
         '<button type="button" class="link" data-sheet="sleep">Изменить</button></div>' +
-    "</section>" + formCard();
+      '<div class="morningrow"><button type="button" class="morningtag" data-sheet="morning">' + morningLabel() +
+        (morningPenalty() ? " −" + morningPenalty() + " пп" : "") + "</button></div>" +
+    "</section>";
   }
 
-  function duoBlock() {
-    const v = liveValue();
-    const has = v != null;
-    const proj = has ? projection() : 0;
-    const ep = hoursToEvening();
-    return '<div class="duo">' +
-      '<section class="card"><div class="label">к вечеру</div>' +
-        '<div class="big ' + (has ? "big--lime" : "big--mute") + '">' + (has ? proj.toFixed(1) : "—") + '<small>%</small></div>' +
-        '<div class="note">' + (has ? ep.label.toLowerCase() : "нет базы") + "</div></section>" +
-      '<section class="card"><div class="label">форма</div>' +
-        '<div class="big">' + Math.round(formNow() * 100) + '<small>%</small></div>' +
-        '<div class="note">расход x' + formMult().toFixed(2) + "</div></section>" +
-    "</div>";
+  function pausesLeftToday() {
+    const r = S.runtime;
+    return Math.max(0, S.config.micro_pause_limit - (r.pause_day === todayKey() ? (r.pause_count || 0) : 0));
+  }
+
+  function protocolInfo(key) {
+    const c = S.config;
+    if (key === "scout") return {
+      word: "разведка",
+      title: "Разведка",
+      body: c.scout_min + " минут на то, чтобы осознанно посмотреть отвлечение. Когда время выйдет, приложение спросит: продолжили работу или остановились. Это выбор, а не срыв — вход за разведку не списывается.",
+      foot: "Работает один раз за раз, потом ждёт ответа."
+    };
+    if (key === "window") return {
+      word: "окно",
+      title: "Окно",
+      body: "Осознанная пауза на " + c.legit_window_min + " минут. Начисление останавливается целиком, заряд почти не тает: " + c.window_rate + " пп/час. Окно возвращает к базе, но выше базы не поднимает.",
+      foot: "В день не больше " + c.legit_window_limit + ". Дальше фиксируется как автопилот."
+    };
+    return {
+      word: "пауза",
+      title: "Пятнадцать минут без экрана",
+      body: "Микропауза возвращает " + c.micro_pause + " пп к заряду и снимает накопленное напряжение. Экран при этом лучше действительно отложить.",
+      foot: "Осталось сегодня: " + pausesLeftToday() + " из " + c.micro_pause_limit + "."
+    };
   }
 
   function protocolsRow() {
-
     const r = S.runtime;
-    const pausesLeft = Math.max(0, S.config.micro_pause_limit - (r.pause_day === todayKey() ? (r.pause_count || 0) : 0));
-    return '<section class="card card--tight"><div class="label" style="margin-bottom:var(--s2)">протоколы</div><div class="protocols">' +
-      '<button type="button" class="pill" data-act="scout"' + (r.scout_end ? " disabled" : "") + ">" +
-        "<span>" + icon("bolt", 15) + " " + (r.scout_end ? "Разведка · " + hhmm(r.scout_end - Date.now()) : "Разведка 5 мин") + "</span>" +
-        '<span class="pill-meta">туман</span></button>' +
-      '<button type="button" class="pill" data-act="window"' + (r.window_end ? " disabled" : "") + ">" +
-        "<span>" + icon("shield", 15) + " " + (r.window_end ? "Окно · " + hhmm(r.window_end - Date.now()) : "Окно 45 мин") + "</span>" +
-        '<span class="pill-meta">пауза</span></button>' +
-      '<button type="button" class="pill" data-act="microPause">' +
-        "<span>" + icon("leaf", 15) + " 15 мин без экрана</span>" +
-        '<span class="pill-meta">+' + S.config.micro_pause + " · " + pausesLeft + "/" + S.config.micro_pause_limit + "</span></button>" +
+    const item = (key, ico, on, tail) =>
+      '<button type="button" class="proto' + (on ? " is-on" : "") + '" data-act="' + key + '" data-hold="' + key + '">' +
+        icon(ico, 14) + "<span>" + protocolInfo(key).word + (tail ? " " + tail : "") + "</span></button>";
+    return '<section class="card card--tight"><div class="between" style="margin-bottom:var(--s2)">' +
+      '<span class="label">протоколы</span>' +
+      '<span class="hint-mini">удержание — что это</span></div><div class="protos">' +
+      item("scout", "bolt", !!r.scout_end, r.scout_end ? hhmm(r.scout_end - Date.now()).slice(0, 5) : "") +
+      item("window", "shield", !!r.window_end, r.window_end ? hhmm(r.window_end - Date.now()).slice(0, 5) : "") +
+      item("microPause", "leaf", false, "") +
     "</div></section>";
+  }
+
+  function openProtocolSheet(key) {
+    const info = protocolInfo(key);
+    const r = S.runtime;
+    const busy = (key === "scout" && r.scout_end) || (key === "window" && r.window_end);
+    openModal({
+      title: info.title,
+      html: '<p class="note">' + info.body + "</p><p class=\"note dim\">" + info.foot + "</p>",
+      actions: [
+        { label: "Закрыть", onClick: closeModal },
+        busy
+          ? { label: "Уже идёт", kind: "primary", onClick: closeModal }
+          : { label: "Запустить", kind: "primary", onClick: () => { closeModal(); act(key); } }
+      ]
+    });
   }
 
   function workCard() {
@@ -677,7 +733,7 @@
     return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день</h2>' +
       '<span class="chip">' + wRate.toFixed(2) + " пп/ч</span></div>" +
       (w.active
-        ? '<div class="switch-big"><div><div class="timer" id="workClock">' + hhmm(Date.now() - Date.parse(w.started_at)).slice(0, 5) + "</div>" +
+        ? '<div class="switch-big"><div><div class="timer" id="workClock">' + fmtHm(Date.now() - Date.parse(w.started_at)) + "</div>" +
           '<p class="note">Дорога входит в окно. За 10–11 часов ≈ ' + Math.abs(wRate * 10.5).toFixed(1) + " пп.</p></div></div>" +
           '<div class="row"><button type="button" class="primary" data-act="work">Завершить день</button></div>'
         : '<p class="dim">Работа и дорога тратят ресурс сами по себе.</p>' +
@@ -695,43 +751,42 @@
     const inWin = S.runtime.status === "cooling";
     const residue = isResidue();
     const zeroed = !s.active || inWin || (residue && s.kind === "stab");
-    const impact = zeroed ? 0 : (s.kind === "drain" ? -S.config.drain_coef * w : S.config.stab_coef * w * (s.context === "cognitive" ? -0.8 : 1));
-    const ep = hoursToEvening();
-    const delta = impact * ep.hours;
-    const meta = zeroed
-      ? "не влияет" + (inWin ? " · в окне" : residue && s.kind === "stab" ? " · остаток" : s.active ? "" : " · выключен")
-      : (impact > 0 ? "+" : "−") + Math.abs(delta).toFixed(1) + " пп " + ep.label.toLowerCase() +
-        (s.kind === "drain" ? " · вход " + S.config.entry_cost : "");
+    const rate = s.kind === "drain"
+      ? -S.config.drain_coef * w
+      : S.config.stab_coef * w * (s.context === "cognitive" ? -0.8 : 1);
+    const live = s.active && slotMinutes(s.id) >= 1 ? hhmm(slotMinutes(s.id) * 60000).slice(0, 5) : "";
+    const sub = [esc(s.trigger),
+      s.context !== "any" ? (s.context === "mechanical" ? "механика" : "когнитивная") : "",
+      live ? "идёт " + live : "",
+      zeroed && s.active ? "не влияет" : ""].filter(Boolean).join(" · ");
+    const rateTxt = w > 0
+      ? (rate > 0 ? "+" : "−") + Math.abs(rate).toFixed(2) + "<i>пп/ч</i>"
+      : '<i>вес 0</i>';
 
-    return '<div class="tile tile--' + s.kind + (s.active ? " is-on" : "") + '">' +
-      '<button type="button" class="tile-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '">' +
-        '<div class="tile-name">' + (s.kind === "drain" ? icon("down", 12) : icon("up", 12)) + esc(s.title) + "</div>" +
-        '<div class="tile-trig">' + esc(s.trigger) + (s.context !== "any" ? " · " + (s.context === "mechanical" ? "механика" : "когнитивная") : "") + "</div>" +
-        '<div class="tile-meta">' + meta + "</div>" +
-        (s.active ? '<div class="tile-live" id="tm-' + s.id + '">' + liveTileText(s) + "</div>" : "") +
+    return '<div class="flow flow--' + s.kind + (s.active ? " is-on" : "") + '">' +
+      '<button type="button" class="flow-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '">' +
+        '<span class="flow-name">' + (s.kind === "drain" ? icon("down", 12) : icon("up", 12)) + esc(s.title) + "</span>" +
+        '<span class="flow-num' + (zeroed ? " is-off" : "") + '">' + rateTxt + "</span>" +
+        '<span class="flow-sub">' + sub + "</span>" +
       "</button>" +
-      '<button type="button" class="tile-edit" data-edit="' + s.id + '" aria-label="Настроить слот «' + esc(s.title) + '»">' + icon("pencil", 16) + '</button>' +
+      '<button type="button" class="flow-edit" data-edit="' + s.id + '" aria-label="Настроить слот «' + esc(s.title) + '»">' + icon("pencil", 15) + "</button>" +
     "</div>";
   }
 
   function slotsBlock() {
     return '<section class="card"><div class="between"><h2 style="margin:0">Потоки</h2>' +
-      '<span class="chip">' + S.slots.filter((s) => s.active).length + " / 6</span></div>" +
-      '<p class="note">Тап по плитке включает и выключает. Включение потребителя списывает вход ' + S.config.entry_cost + " пп.</p>" +
-      '<div class="tiles">' + S.slots.map(tile).join("") + "</div></section>";
+      '<span class="chip">' + S.slots.filter((s) => s.active).length + " / " + S.slots.length + "</span></div>" +
+      '<p class="note">Тап включает и выключает, удержание — настройка. Включение потребителя списывает вход ' + S.config.entry_cost + " пп.</p>" +
+      '<div class="flows">' + S.slots.map(tile).join("") + "</div></section>";
   }
 
   function switchRow() {
     const r = S.runtime;
-    if (r.drain_start) {
-      return '<section class="card"><div class="between"><h2 style="margin:0">Эпизод идёт</h2>' +
-        '<span class="mono" id="drainClock" style="font-size:22px">' + hhmm(Date.now() - r.drain_start).slice(0, 5) + "</span></div>" +
-        '<p class="note">' + (r.pending_entry ? "Вход " + S.config.entry_cost + " пп уже списан." : "Вход не списан: склейка с предыдущим эпизодом.") + "</p>" +
-        '<div class="row"><button type="button" class="primary" data-act="return">Вернулся</button></div></section>';
-    }
-    return '<section class="card card--tight"><div class="row">' +
-      '<button type="button" class="primary" data-act="switch">Внеплановое переключение · −' + S.config.entry_cost + "</button>" +
-      '<button type="button" class="link" data-act="manualInt">записать задним числом</button></div></section>';
+    if (!r.drain_start) return "";
+    return '<section class="card"><div class="between"><h2 style="margin:0">Эпизод идёт</h2>' +
+      '<span class="mono" id="drainClock" style="font-size:22px">' + hhmm(Date.now() - r.drain_start).slice(0, 5) + "</span></div>" +
+      '<p class="note">' + (r.pending_entry ? "Вход " + S.config.entry_cost + " пп уже списан." : "Вход не списан: склейка с предыдущим эпизодом.") + "</p>" +
+      '<div class="row"><button type="button" class="primary" data-act="return">Вернулся</button></div></section>';
   }
 
   function patchBody(lines) {
@@ -759,7 +814,6 @@
   let activeTab = "home";
 
   let touchedSliders = new Set();
-  let morningOpen = false;
 
   function marksBlock() {
     const counts = hookCounts();
@@ -772,56 +826,71 @@
       "</div>";
   }
 
+  function journalOpen() {
+    try { return localStorage.getItem("et_journal_open") === "1"; } catch (e) { return false; }
+  }
+
   function journalCard() {
     const r = S.runtime;
     const live = !!(r.focus_start || r.scout_end || r.window_end);
+    const open = journalOpen();
     const fLabel = r.focus_start ? "Фокус · " + hhmm(Date.now() - r.focus_start) : "Засечь фокус";
-    return '<section class="card card--tight"><div class="between">' +
-      '<div class="label">журнал дня</div>' +
-      '<span class="chip">' + timelineEvents().length + " соб.</span></div>" +
-      '<div class="row" style="margin:var(--s2) 0 var(--s3)">' +
+    const head = '<button type="button" class="journal-head" data-journal="1" aria-expanded="' + (open ? "true" : "false") + '">' +
+      '<span class="label">журнал дня</span>' +
+      '<span class="journal-tail"><span class="chip">' + timelineEvents().length + " соб.</span>" +
+      '<span class="journal-chev' + (open ? " is-open" : "") + '">' + icon("chevron", 16) + "</span></span></button>";
+    if (!open) return '<section class="card card--tight">' + head + "</section>";
+    return '<section class="card card--tight">' + head +
+      '<div class="row" style="margin:var(--s3) 0">' +
         '<button type="button" class="pill ' + (live ? "is-live" : "") + '" data-act="focus" id="focusPill"><span>' +
           icon("bolt", 15) + " " + fLabel + "</span><span class=\"pill-meta\">" +
           (r.focus_start ? "стоп" : "замер") + "</span></button></div>" +
       timeline(6) +
       marksBlock() +
       '<div class="sleepline"><span>ёмкость внимания за неделю <b class="mono">' + avgFocus() + '</b></span></div>' +
+      '<div class="journal-foot"><button type="button" class="link" data-act="manualInt">записать переключение задним числом</button></div>' +
     "</section>";
   }
 
-  function morningCard() {
-    const lv = morningLevel(), pen = morningPenalty();
-    const manual = morningManual();
+  function morningLabel() {
+    const lv = morningLevel();
     const n = morningMarks();
-    const opts = [["чисто", 0], ["до 15 мин", 1], ["больше", 2]];
-    const head = '<div class="between"><div class="label">утро</div>' +
-      '<span class="chip">потолок ' + Math.round(dayCeiling()) + "%" +
-      (pen ? " · −" + pen + " пп" : "") + "</span></div>";
-
-    if (n > 0 && !manual && !morningOpen) {
-      return '<section class="card card--tight">' + head +
-        '<div class="between" style="margin-top:var(--s2)">' +
-        '<span class="note" style="margin:0">' + cap(opts[lv][0]) + " · по " + n + " " +
-          plural(n, ["метке", "меткам", "меткам"]) + " за первые 90 минут</span>" +
-        '<button type="button" class="link" data-act="morningEdit">поправить</button></div></section>';
-    }
-
-    const hint = manual
-      ? "Отмечено вручную. Тап по выбранному варианту возвращает назад к меткам."
-      : n > 0
-        ? "Датчик дал " + n + " " + plural(n, ["метку", "метки", "меток"]) + " за первые 90 минут. Можно поправить, если залипал вне отслеживаемых приложений."
-        : "Меток за первые 90 минут нет — датчик молчал: ПК был выключен или Ярлыки не сработали. Пока ничего не выбрано, утро считается чистым.";
-
-    return '<section class="card card--tight">' + head +
-      '<div class="pick-row">' + opts.map(([l, v]) =>
-        '<button type="button" class="pick" data-morning="' + v + '" aria-pressed="' + (lv === v) + '">' + l + "</button>").join("") +
-      "</div>" +
-      '<p class="note" style="margin-top:var(--s3)">' + hint + "</p></section>";
+    const base = lv === 0 ? "утро чисто" : lv === 1 ? "утро до 15 мин" : "утро больше 15 мин";
+    if (morningManual()) return base + " · вручную";
+    return n === 0 ? "утро без меток" : base;
   }
+
+  function setMorning(lv) {
+    const already = morningManual() && morningLevel() === lv;
+    S.runtime.morning = already ? null : { day: todayKey(), level: lv, manual: true };
+    save();
+    closeModal();
+    render();
+    toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный"));
+  }
+
+  function openMorningSheet() {
+    const n = morningMarks(), lv = morningLevel();
+    const wake = wakeMoment(Date.now());
+    const upto = fmtClock(wake + 90 * 60000);
+    const head = n > 0
+      ? "Датчик дал " + n + " " + plural(n, ["метку", "метки", "меток"]) + " с " + fmtClock(wake) + " до " + upto + ". Это и есть уровень залипания."
+      : "С " + fmtClock(wake) + " до " + upto + " меток нет: ПК был выключен или Ярлыки не сработали. Пока ничего не выбрано, утро считается чистым.";
+    openModal({
+      title: "Утро после подъёма",
+      html: '<p class="note">' + head + (morningManual() ? " Сейчас стоит ручная отметка — тап по выбранному варианту вернёт к расчёту по меткам." : "") + "</p>",
+      actions: [
+        { label: "Чисто" + (lv === 0 ? " ✓" : ""), onClick: () => setMorning(0) },
+        { label: "До 15 мин" + (lv === 1 ? " ✓" : ""), onClick: () => setMorning(1) },
+        { label: "Больше" + (lv === 2 ? " ✓" : ""), onClick: () => setMorning(2) }
+      ]
+    });
+  }
+
 
   function renderHome() {
     const r = S.runtime;
-    let h = heroBlock() + morningCard() + duoBlock() + protocolsRow() + workCard() + slotsBlock() + switchRow();
+    let h = heroBlock() + slotsBlock() + formCard() + protocolsRow() + workCard() + switchRow();
     if (r.scout_pending) {
       h += '<section class="card"><h2>Разведка завершена</h2><p class="dim">Продолжили работу после сигнала?</p>' +
         '<div class="row"><button type="button" class="primary" data-scout="yes">Продолжил</button>' +
@@ -839,11 +908,11 @@
     const names = { scout: "Разведка", window: "Окно", focus: "Фокус", work: "Работа и дорога" };
     const ev = [];
     for (const x of S.sessions) {
-      ev.push({ at: x.started_at, kind: names[x.type] || x.type, tail: x.duration_min + " мин",
+      ev.push({ at: x.started_at, kind: names[x.type] || x.type, tail: fmtHm(x.duration_min * 60000),
         sub: x.type === "scout" ? (x.extended ? "продолжил" : "остановился") : x.type === "work" ? "рабочий день" : "" });
     }
     for (const x of S.interruptions) {
-      ev.push({ at: x.started_at, kind: "Переключение", tail: x.duration_min + " мин",
+      ev.push({ at: x.started_at, kind: "Переключение", tail: fmtHm(x.duration_min * 60000),
         sub: (x.entry_charged ? "вход −" + S.config.entry_cost : "без входа") + (x.merged ? " · склейка" : "") });
     }
     for (const c of S.captures) ev.push({ at: c.created_at, kind: "Захват", tail: "", sub: c.text.slice(0, 60) });
@@ -1262,7 +1331,7 @@
     if (!box) return;
     box.innerHTML = TABS.map(([k, l]) =>
       '<button type="button" role="tab" aria-selected="' + (k === activeTab) + '" data-tab="' + k + '">' + l + "</button>").join("");
-    $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; morningOpen = false; render(); }; });
+    $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; render(); }; });
   }
 
   let painted = false;
@@ -1290,13 +1359,15 @@
   function updateLive() {
     const wc = $("#workClock");
     if (wc && workActive() && S.runtime.work.started_at) {
-      wc.textContent = hhmm(Date.now() - Date.parse(S.runtime.work.started_at)).slice(0, 5);
+      wc.textContent = fmtHm(Date.now() - Date.parse(S.runtime.work.started_at));
     }
     if (activeTab !== "home") return;
 
     const val = $("#heroVal"); if (!val) return;
     const fv = $("#formVal");
-    if (fv) fv.textContent = Math.round(formNow() * 100) + "%";
+    if (fv) fv.innerHTML = Math.round(formNow() * 100) + "<small>%</small>";
+    const ft = $("#formNowTxt");
+    if (ft) ft.textContent = fmtClock(Date.now());
     const fmul = $("#formMul");
     if (fmul) fmul.textContent = formMult().toFixed(2);
     const fm = $("#formNow");
@@ -2518,7 +2589,10 @@
     $$("[data-go]").forEach((b) => { b.onclick = () => { activeTab = b.dataset.go; render(); }; });
     $$("[data-act]").forEach((b) => { b.onclick = () => act(b.dataset.act); });
     $$("[data-sheet]").forEach((b) => {
-      b.onclick = () => { if (b.dataset.sheet === "sleep") openSleepSheet(); };
+      b.onclick = () => {
+        if (b.dataset.sheet === "sleep") openSleepSheet();
+        else if (b.dataset.sheet === "morning") openMorningSheet();
+      };
     });
     $$("[data-tog]").forEach((b) => {
       let lp = null;
@@ -2549,18 +2623,27 @@
       };
     });
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
-    $$("[data-morning]").forEach((b) => {
+    $$("[data-journal]").forEach((b) => {
       b.onclick = () => {
-        const lv = Number(b.dataset.morning) || 0;
-        const already = morningManual() && morningLevel() === lv;
-        S.runtime.morning = already ? null : { day: todayKey(), level: lv, manual: true };
-        morningOpen = false;
-        save(); render();
-        toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный"));
+        try { localStorage.setItem("et_journal_open", journalOpen() ? "0" : "1"); } catch (e) {}
+        render();
       };
     });
-    const mEdit = $('[data-act="morningEdit"]');
-    if (mEdit) mEdit.onclick = () => { morningOpen = true; render(); };
+    $$("[data-hold]").forEach((b) => {
+      let lp = null;
+      const fire = () => { b.dataset.long = "1"; openProtocolSheet(b.dataset.hold); };
+      b.addEventListener("pointerdown", () => { clearTimeout(lp); lp = setTimeout(fire, 500); });
+      ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
+        b.addEventListener(ev, () => { if (lp) { clearTimeout(lp); lp = null; } }));
+      b.addEventListener("contextmenu", (e) => {
+        if (b.dataset.hold) { e.preventDefault(); fire(); }
+      });
+      const nativeClick = b.onclick;
+      b.onclick = (e) => {
+        if (b.dataset.long) { delete b.dataset.long; e.stopImmediatePropagation(); return; }
+        if (nativeClick) nativeClick(e);
+      };
+    });
     const workW = $("[data-workw]");
     if (workW) {
       const out = $("#workW-v");
