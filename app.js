@@ -18,10 +18,11 @@
   };
   const clockBig = (ms) => {
     const t = Math.max(0, Math.floor(ms / 1000));
-    const h = String(Math.floor(t / 3600)).padStart(2, "0");
-    const m = String(Math.floor(t / 60) % 60).padStart(2, "0");
-    const s = String(t % 60).padStart(2, "0");
-    return h + ":" + m + ':<span>' + s + "</span>";
+    const cell = (str, cls) => str.split("").map((c) =>
+      "<i" + (cls ? ' class="' + cls + '"' : "") + ">" + c + "</i>").join("");
+    return cell(String(Math.floor(t / 3600)).padStart(2, "0")) +
+      "<s>:</s>" + cell(String(Math.floor(t / 60) % 60).padStart(2, "0")) +
+      "<s>:</s>" + cell(String(t % 60).padStart(2, "0"), "sec");
   };
   const hhmm = (ms) => { const m = Math.max(0, Math.round(ms / 1000)); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
   const toMin = (t) => { const p = String(t || "0:0").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
@@ -42,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v49";
+  const BUILD = "et-v50";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };

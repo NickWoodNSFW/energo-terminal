@@ -569,13 +569,15 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .sld--mid input[type=range]::-moz-range-thumb,
 .sld--hard input[type=range]::-moz-range-thumb{border-color:var(--tone)}
 
-/* живой счётчик рабочего дня */
+/* живой счётчик рабочего дня: сериф, каждая цифра в своей ячейке — тикает без дёрганья */
 .clock{
-  font-family:var(--num);font-variant-numeric:tabular-nums;font-weight:600;
-  font-size:52px;line-height:1;letter-spacing:-.01em;color:var(--txt);
-  margin:var(--s3) 0 var(--s4)
+  font-family:var(--display);font-weight:900;
+  font-size:56px;line-height:1;letter-spacing:-.01em;color:var(--txt);
+  margin:var(--s3) 0 var(--s4);white-space:nowrap
 }
-.clock span{color:var(--mute)}
+.clock i{display:inline-block;width:.58em;text-align:center;font-style:normal}
+.clock s{display:inline-block;width:.34em;text-align:center;text-decoration:none;color:var(--mute)}
+.clock i.sec{color:var(--mute)}
 
 @media(min-width:560px){
   .protocols{grid-template-columns:1fr 1fr 1fr}
