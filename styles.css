@@ -334,15 +334,13 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .toast.is-on{opacity:1;transform:translate(-50%,0)}
 
 /* ---------- модальное окно ---------- */
-.modal{position:fixed;inset:0;z-index:70;display:none;align-items:flex-end;justify-content:center;
-  background:rgba(3,6,9,.72)}
+.modal{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;
+  padding:var(--s4);background:rgba(3,6,9,.72)}
 .modal.is-open{display:flex}
 .modal__box{
   width:100%;max-width:520px;background:var(--panel);border:1px solid var(--line-2);
-  border-radius:var(--r-xl) var(--r-xl) 0 0;padding:var(--s5);
-  padding-bottom:calc(var(--s5) + env(safe-area-inset-bottom));
-  max-height:88svh;overflow:auto
-}
+  border-radius:var(--r-xl);padding:var(--s5);
+  max-height:min(84svh,760px);overflow:auto}
 .modal__title{font-size:18px;font-weight:600;margin-bottom:var(--s3)}
 .modal__body{font-size:15px;color:var(--dim);line-height:1.55}
 .modal__body p{margin-bottom:var(--s3)}
@@ -446,7 +444,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .flow{position:relative}
 .flow + .flow::before{content:"";position:absolute;left:40px;right:0;top:0;height:1px;background:var(--line)}
 .flow-main{
-  display:grid;grid-template-columns:28px minmax(0,1fr) auto 32px;align-items:center;gap:var(--s2);
+  display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:var(--s2);
   width:100%;min-height:60px;padding:var(--s3) 0;background:none;border:none;text-align:left;border-radius:0
 }
 .flow-tile{
@@ -591,13 +589,12 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
   .tabs{position:sticky;top:var(--s3);bottom:auto;border:1px solid var(--line);
     border-radius:var(--r-md);margin-bottom:var(--s5);padding:var(--s1);
     background:rgba(13,18,25,.9);backdrop-filter:blur(12px)}
-  .modal{align-items:center}
-  .modal__box{border-radius:var(--r-xl);margin:var(--s4)}
+  .modal__box{margin:var(--s2) auto}
 }
 /* ---------- движение: один авторский вход, экспоненциальное затухание ---------- */
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @keyframes veil-in{from{opacity:0}to{opacity:1}}
-@keyframes sheet-in{from{opacity:.55;transform:translateY(26px)}to{opacity:1;transform:none}}
+@keyframes sheet-in{from{opacity:.55;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
 
 /* вход играет только при первом показе экрана, не при каждой перерисовке */
 body[data-paint="first"] .card{animation:rise .44s var(--ease) both}
@@ -702,6 +699,24 @@ h2{font-size:26px;line-height:1.12;letter-spacing:-.015em}
 .hero .cell{background:transparent;box-shadow:inset 0 0 0 1px rgba(245,245,240,.07)}
 .hero .cell i.wane{background:rgba(226,241,99,.40)}
 .hero .cell i.deep{background:linear-gradient(180deg,var(--lime),#b9cf3a)}
+
+/* обгоревшая кромка: рваный верх у заливки той ячейки, что горит сейчас */
+.hero .cell.is-burn i.wane{background:linear-gradient(180deg,#f3ffb0 0%,rgba(226,241,99,.78) 18%,rgba(226,241,99,.42) 60%,rgba(226,241,99,.30) 100%)}
+.hero .cell.is-burn i.wane::after{
+  content:"";position:absolute;left:-3px;right:-3px;top:-9px;height:11px;
+  background:#f2ff9a;pointer-events:none;
+  filter:drop-shadow(0 -1px 2px rgba(226,241,99,.55));
+  -webkit-clip-path:polygon(0 42%,7% 26%,14% 56%,22% 18%,30% 50%,38% 12%,46% 46%,54% 8%,62% 48%,70% 20%,78% 54%,86% 26%,94% 46%,100% 34%,100% 100%,0 100%);
+  clip-path:polygon(0 42%,7% 26%,14% 56%,22% 18%,30% 50%,38% 12%,46% 46%,54% 8%,62% 48%,70% 20%,78% 54%,86% 26%,94% 46%,100% 34%,100% 100%,0 100%)
+}
+.hero .cell.is-burn:nth-child(3n+2) i.wane::after{
+  -webkit-clip-path:polygon(0 30%,8% 52%,16% 22%,24% 58%,32% 30%,40% 10%,48% 42%,56% 16%,64% 52%,72% 24%,80% 48%,88% 14%,96% 44%,100% 28%,100% 100%,0 100%);
+  clip-path:polygon(0 30%,8% 52%,16% 22%,24% 58%,32% 30%,40% 10%,48% 42%,56% 16%,64% 52%,72% 24%,80% 48%,88% 14%,96% 44%,100% 28%,100% 100%,0 100%)
+}
+.hero .cell.is-burn:nth-child(3n) i.wane::after{
+  -webkit-clip-path:polygon(0 50%,6% 22%,13% 46%,20% 14%,28% 44%,36% 20%,44% 52%,52% 26%,60% 46%,68% 12%,76% 40%,84% 56%,92% 22%,100% 42%,100% 100%,0 100%);
+  clip-path:polygon(0 50%,6% 22%,13% 46%,20% 14%,28% 44%,36% 20%,44% 52%,52% 26%,60% 46%,68% 12%,76% 40%,84% 56%,92% 22%,100% 42%,100% 100%,0 100%)
+}
 
 /* график: полоса с рамкой, чтобы линия не висела в пустоте */
 .hero .spark{margin-top:var(--s3);padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}

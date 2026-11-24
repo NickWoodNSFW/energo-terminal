@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v53";
+  const BUILD = "et-v54";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -634,6 +634,14 @@
     "</div>";
   }
 
+  // ячейка, у которой сейчас горит кромка: та, что заполнена частично
+  function burnIdxOf(v) {
+    if (!(v > 0.4) || v >= 99.6) return -1;
+    const i = Math.floor(v / 10);
+    const frac = v - i * 10;
+    return frac > 0.4 && frac < 9.6 ? i : -1;
+  }
+
   function heroBlock() {
     const v = liveValue();
     if (v == null) {
@@ -649,11 +657,13 @@
     }
     const lv = levelOf(v), ceil = dayCeiling(), proj = projection(), ep = hoursToEvening();
     const f = sleepFactor();
+    const burn = burnIdxOf(v);
     const cells = Array.from({ length: 10 }, (_, i) => {
       const cur = clamp((v - i * 10) / 10, 0, 1) * 100;
       const fut = clamp((proj - i * 10) / 10, 0, 1) * 100;
       const locked = i * 10 >= ceil ? " is-locked" : "";
-      return '<span class="cell' + locked + '"><i class="wane" style="height:' + cur.toFixed(1) + '%"></i><i class="deep" style="height:' + fut.toFixed(1) + '%"></i></span>';
+      const hot = i === burn ? " is-burn" : "";
+      return '<span class="cell' + locked + hot + '"><i class="wane" style="height:' + cur.toFixed(1) + '%"></i><i class="deep" style="height:' + fut.toFixed(1) + '%"></i></span>';
     }).join("");
     return '<section class="card hero" style="--lvl:' + lv.c1 + ';--lvl-2:' + lv.c2 + '">' +
       '<div class="hero-top"><div>' +
@@ -817,12 +827,9 @@
 
   function slotsBlock() {
     const on = S.slots.filter((s) => s.active).length;
-    const sum = S.slots.reduce((a, s) => a + slotLive(s), 0);
-    const sign = sum > 0 ? "+" : "−";
     return '<section class="card"><div class="between"><h2 style="margin:0">Потоки</h2>' +
       '<span class="chip mono">' + on + " / " + S.slots.length + "</span></div>" +
-      '<div class="flows-topline"><span class="hint-mini">тап — включить, удержание — настройка</span>' +
-        '<b class="mono">' + (Math.abs(sum) < 0.005 ? "баланс ровный" : sign + Math.abs(sum).toFixed(2) + " %/ч") + "</b></div>" +
+      '<div class="flows-topline"><span class="hint-mini">тап — включить, удержание — настройка</span></div>' +
       '<div class="flows">' +
         flowGroup("drain", "съедают") +
         flowGroup("stab", "возвращают") +
@@ -1591,12 +1598,14 @@
     const pv = $("#heroProj"); if (pv) pv.textContent = proj.toFixed(1);
     const cells = $("#batCells");
     if (cells && cells.children.length === 10) {
+      const burn = burnIdxOf(v);
       for (let i = 0; i < 10; i++) {
         const cur = clamp((v - i * 10) / 10, 0, 1) * 100;
         const fut = clamp((proj - i * 10) / 10, 0, 1) * 100;
         const wane = cells.children[i].children[0], deep = cells.children[i].children[1];
         if (wane) wane.style.height = cur.toFixed(1) + "%";
         if (deep) deep.style.height = fut.toFixed(1) + "%";
+        cells.children[i].classList.toggle("is-burn", i === burn);
       }
     }
     const sb = $("#sparkBox");
