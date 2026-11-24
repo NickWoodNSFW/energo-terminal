@@ -260,8 +260,6 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .tabs button[aria-selected="true"]{color:var(--lime);background:rgba(226,241,99,.1)}
 
 /* ---------- прочее ---------- */
-.timer{font-family:var(--display);font-weight:900;font-size:38px;line-height:.95;letter-spacing:-.02em;margin:var(--s4) 0 var(--s1);color:var(--txt)}
-.timer span{font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--mute);margin-left:4px}
 .timer--idle{color:var(--mute)}
 .tabs-text{display:flex;gap:var(--s5);margin-bottom:var(--s4)}
 .tabs-text button{position:relative;min-height:44px;padding:0 2px;background:none;border:none;
@@ -435,7 +433,6 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 
 /* работа */
 .switch-big{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap}
-.switch-big .timer{font-size:38px;margin:var(--s3) 0 var(--s1)}
 
 /* потоки — карточка строк с тумблером */
 .flows-topline{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin-top:var(--s1)}
@@ -546,6 +543,39 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .sld-top label{margin:0}
 .sld-val{display:flex;align-items:baseline;gap:var(--s1);font-family:var(--display);font-weight:900;font-size:26px;line-height:1;color:var(--lime)}
 .sld-val small{font-family:var(--sans);font-size:12px;font-weight:600;color:var(--mute)}
+
+/* тяжесть дня: зелёный 1-4, жёлтый 5-7, красный 8-10 */
+.sld--easy{--tone:#7ad98a}
+.sld--mid{--tone:var(--lime)}
+.sld--hard{--tone:var(--bad)}
+.sld--easy .sld-val,.sld--mid .sld-val,.sld--hard .sld-val{color:var(--tone);transition:color var(--t-fast)}
+.sld--easy .sld-val small,.sld--mid .sld-val small,.sld--hard .sld-val small{color:var(--tone);opacity:.8}
+.sld--easy input[type=range]::-webkit-slider-runnable-track,
+.sld--mid input[type=range]::-webkit-slider-runnable-track,
+.sld--hard input[type=range]::-webkit-slider-runnable-track{
+  background:linear-gradient(90deg,var(--tone) var(--p,50%),rgba(140,170,205,.3) var(--p,50%));
+  transition:background var(--t-fast)
+}
+.sld--easy input[type=range]::-webkit-slider-thumb,
+.sld--mid input[type=range]::-webkit-slider-thumb,
+.sld--hard input[type=range]::-webkit-slider-thumb{border-color:var(--tone)}
+.sld--easy input[type=range]::-moz-range-track,
+.sld--mid input[type=range]::-moz-range-track,
+.sld--hard input[type=range]::-moz-range-track{background:rgba(140,170,205,.3)}
+.sld--easy input[type=range]::-moz-range-progress,
+.sld--mid input[type=range]::-moz-range-progress,
+.sld--hard input[type=range]::-moz-range-progress{background:var(--tone);height:4px;border-radius:2px}
+.sld--easy input[type=range]::-moz-range-thumb,
+.sld--mid input[type=range]::-moz-range-thumb,
+.sld--hard input[type=range]::-moz-range-thumb{border-color:var(--tone)}
+
+/* живой счётчик рабочего дня */
+.clock{
+  font-family:var(--num);font-variant-numeric:tabular-nums;font-weight:600;
+  font-size:52px;line-height:1;letter-spacing:-.01em;color:var(--txt);
+  margin:var(--s3) 0 var(--s4)
+}
+.clock span{color:var(--mute)}
 
 @media(min-width:560px){
   .protocols{grid-template-columns:1fr 1fr 1fr}

@@ -16,10 +16,12 @@
     if (min < 60) return min + " мин";
     return Math.floor(min / 60) + " ч " + String(min % 60).padStart(2, "0") + " мин";
   };
-  const hmBig = (ms) => {
-    const min = Math.max(0, Math.round(ms / 60000));
-    if (min < 60) return String(min) + "<span>мин</span>";
-    return Math.floor(min / 60) + " ч " + String(min % 60).padStart(2, "0") + "<span>мин</span>";
+  const clockBig = (ms) => {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    const h = String(Math.floor(t / 3600)).padStart(2, "0");
+    const m = String(Math.floor(t / 60) % 60).padStart(2, "0");
+    const s = String(t % 60).padStart(2, "0");
+    return h + ":" + m + ':<span>' + s + "</span>";
   };
   const hhmm = (ms) => { const m = Math.max(0, Math.round(ms / 1000)); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
   const toMin = (t) => { const p = String(t || "0:0").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
@@ -40,7 +42,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v48";
+  const BUILD = "et-v49";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -735,31 +737,32 @@
     });
   }
 
-  function ppBig(v, unit) {
-    return (v > 0 ? "+" : "−") + Math.abs(v).toFixed(2) + "<span>" + unit + "</span>";
+  function weightWord(w) {
+    return w <= 4 ? "лёгкий" : w <= 7 ? "средний" : "тяжёлый";
+  }
+
+  function weightTone(w) {
+    return w <= 4 ? "easy" : w <= 7 ? "mid" : "hard";
   }
 
   function workCard() {
     const w = S.runtime.work;
     const weight = clamp(Number(w.weight) || 8, 1, 10);
-    const wRate = -S.config.drain_coef * weight;
+    const pct = ((weight - 1) / 9) * 100;
     return '<section class="card"><div class="between"><h2 style="margin:0">Рабочий день</h2>' +
       '<span class="chip">' + (w.active ? "идёт" : "не начат") + "</span></div>" +
-      '<div class="hero-num hero-num--card" id="workRate">' + ppBig(wRate, "пп/ч") + "</div>" +
-      '<div class="hero-sub" id="workRateSub">≈ ' + Math.abs(wRate * 10.5).toFixed(1) + " пп за 10 ч 30 мин</div>" +
       (w.active
-        ? '<div class="switch-big"><div><div class="timer" id="workClock">' + hmBig(Date.now() - Date.parse(w.started_at)) + "</div>" +
-          '<p class="note">Дорога входит в окно.</p></div></div>' +
-          '<div class="row"><button type="button" class="primary" data-act="work">Завершить день</button></div>'
-        : '<p class="dim">Работа и дорога тратят ресурс сами по себе.</p>' +
-          '<div class="row"><button type="button" class="primary" data-act="work">Начать рабочий день</button></div>') +
-      '<div class="sld" style="margin-top:var(--s4)">' +
+        ? '<div class="clock" id="workClock">' + clockBig(Date.now() - Date.parse(w.started_at)) + "</div>"
+        : '<p class="dim">Работа и дорога тратят ресурс сами по себе.</p>') +
+      '<div class="row"><button type="button" class="primary" data-act="work">' +
+        (w.active ? "Завершить день" : "Начать рабочий день") + "</button></div>" +
+      '<div class="sld sld--' + weightTone(weight) + '" id="workSld" style="--p:' + pct + '%">' +
         '<div class="sld-top"><label for="workW">тяжесть дня</label>' +
-          '<span class="sld-val"><b id="workW-v">' + weight + "</b></span></div>" +
+          '<span class="sld-val"><small id="workTone">' + weightWord(weight) + '</small><b id="workW-v">' + weight + "</b></span></div>" +
         '<input type="range" id="workW" min="1" max="10" step="1" value="' + weight + '" data-workw>' +
-        '<div class="hintline">Ровный день — 5, аврал — 9. Меняется на лету и пересчитывает остаток.</div>' +
       "</div></section>";
   }
+
 
   function slotRate(s) {
     const w = Number(s.weight) || 0;
@@ -1450,7 +1453,7 @@
   function updateLive() {
     const wc = $("#workClock");
     if (wc && workActive() && S.runtime.work.started_at) {
-      wc.innerHTML = hmBig(Date.now() - Date.parse(S.runtime.work.started_at));
+      wc.innerHTML = clockBig(Date.now() - Date.parse(S.runtime.work.started_at));
     }
     if (activeTab !== "home") return;
 
@@ -1725,7 +1728,7 @@
       case "work":
         if (!r.work.active) {
           r.work.active = true; r.work.started_at = nowISO(); r.work.updated_at = nowISO(); save(); render();
-          toast("Рабочий день начат · −" + (S.config.drain_coef * (r.work.weight || 0)).toFixed(2) + " пп/ч");
+          toast("Рабочий день начат · тяжесть " + (r.work.weight || 8));
         } else {
           const dur = Math.round((Date.now() - Date.parse(r.work.started_at)) / 60000);
           S.sessions.push({ id: uuid(), updated_at: nowISO(), started_at: r.work.started_at, finished_at: nowISO(), type: "work", duration_min: dur, completed: true });
@@ -2744,10 +2747,16 @@
         if (redraw) render();
       };
       workW.oninput = () => {
-        if (out) out.textContent = workW.value;
-        const rate = -S.config.drain_coef * clamp(Number(workW.value) || 8, 1, 10);
-        const rv = $("#workRate"); if (rv) rv.innerHTML = ppBig(rate, "пп/ч");
-        const rs = $("#workRateSub"); if (rs) rs.textContent = "≈ " + Math.abs(rate * 10.5).toFixed(1) + " пп за 10 ч 30 мин";
+        const w = clamp(Number(workW.value) || 8, 1, 10);
+        if (out) out.textContent = w;
+        const tone = $("#workTone"); if (tone) tone.textContent = weightWord(w);
+        const box = $("#workSld");
+        if (box) {
+          box.classList.remove("sld--easy", "sld--mid", "sld--hard");
+          box.classList.add("sld--" + weightTone(w));
+          box.style.setProperty("--p", ((w - 1) / 9) * 100 + "%");
+        }
+        buzz(6);
       };
       workW.onchange = () => apply(true);
     }
