@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v50";
+  const BUILD = "et-v51";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -596,8 +596,8 @@
     const debt = value != null && value < 0 ? '<span class="badge badge--pause"><span class="dot"></span>долг</span> ' : "";
     if (isResidue()) return debt + '<span class="badge badge--pause"><span class="dot"></span>пауза ' + hhmm(S.runtime.residue_until - Date.now()) + "</span>";
     const r = rateOf();
-    if (r > 0.02) return debt + '<span class="badge badge--up"><span class="dot"></span>+' + r.toFixed(2) + " пп/ч" + (isNight() ? " · сон" : "") + "</span>";
-    if (r < -0.02) return debt + '<span class="badge badge--down"><span class="dot"></span>' + r.toFixed(2) + " пп/ч</span>";
+    if (r > 0.02) return debt + '<span class="badge badge--up"><span class="dot"></span>+' + r.toFixed(2) + " %/ч" + (isNight() ? " · сон" : "") + "</span>";
+    if (r < -0.02) return debt + '<span class="badge badge--down"><span class="dot"></span>' + r.toFixed(2) + " %/ч</span>";
     return debt + '<span class="badge badge--flat"><span class="dot"></span>баланс</span>';
   }
 
@@ -630,7 +630,7 @@
         '<path d="' + path + '" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>' +
         '<circle cx="' + px(last.t).toFixed(1) + '" cy="' + py(last.v).toFixed(1) + '" r="2.5" fill="currentColor"/>' +
       "</svg>" +
-      '<div class="spark-legend">за час ' + sign + Math.abs(delta).toFixed(2) + " пп · " + lo.toFixed(1) + "…" + hi.toFixed(1) + "%</div>" +
+      '<div class="spark-legend">за час ' + sign + Math.abs(delta).toFixed(2) + " % · " + lo.toFixed(1) + "…" + hi.toFixed(1) + "%</div>" +
     "</div>";
   }
 
@@ -659,7 +659,7 @@
       '<div class="hero-top"><div>' +
         '<div class="label">заряд</div>' +
         '<div class="hero-num" id="heroVal">' + v.toFixed(2) + "<span>%</span></div>" +
-        '<div class="hero-sub" id="heroSpent">потрачено ' + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " пп</div>" +
+        '<div class="hero-sub" id="heroSpent">потрачено ' + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " %</div>" +
       "</div><div id=\"heroBadge\">" + statusBadge(v) + "</div></div>" +
       '<div class="battery">' +
         '<div class="bat-shell"><div class="bat-cells" id="batCells">' + cells + "</div></div>" +
@@ -677,7 +677,7 @@
         Math.round(f * 100) + "%</b> · расход <b class=\"mono\">×" + drainMult().toFixed(2) + "</b></span>" +
         '<button type="button" class="link" data-sheet="sleep">Изменить</button></div>' +
       '<div class="morningrow"><button type="button" class="morningtag" data-sheet="morning">' + morningLabel() +
-        (morningPenalty() ? " −" + morningPenalty() + " пп" : "") + "</button></div>" +
+        (morningPenalty() ? " −" + morningPenalty() + " %" : "") + "</button></div>" +
     "</section>";
   }
 
@@ -697,13 +697,13 @@
     if (key === "window") return {
       word: "окно",
       title: "Окно",
-      body: "Осознанная пауза на " + c.legit_window_min + " минут. Начисление останавливается целиком, заряд почти не тает: " + c.window_rate + " пп/час. Окно возвращает к базе, но выше базы не поднимает.",
+      body: "Осознанная пауза на " + c.legit_window_min + " минут. Начисление останавливается целиком, заряд почти не тает: " + c.window_rate + " %/час. Окно возвращает к базе, но выше базы не поднимает.",
       foot: "В день не больше " + c.legit_window_limit + ". Дальше фиксируется как автопилот."
     };
     return {
       word: "пауза",
       title: "Пятнадцать минут без экрана",
-      body: "Микропауза возвращает " + c.micro_pause + " пп к заряду и снимает накопленное напряжение. Экран при этом лучше действительно отложить.",
+      body: "Микропауза возвращает " + c.micro_pause + " % к заряду и снимает накопленное напряжение. Экран при этом лучше действительно отложить.",
       foot: "Осталось сегодня: " + pausesLeftToday() + " из " + c.micro_pause_limit + "."
     };
   }
@@ -801,7 +801,7 @@
           '<span class="flow-name">' + esc(s.title) + "</span>" +
           '<span class="flow-sub">' + sub + "</span>" +
         "</span>" +
-        '<span class="flow-num' + (zeroed ? " is-off" : "") + (w > 0 ? "" : " is-zero") + '">' + num + "<i>пп/ч</i></span>" +
+        '<span class="flow-num' + (zeroed ? " is-off" : "") + (w > 0 ? "" : " is-zero") + '">' + num + "<i>%/ч</i></span>" +
         '<span class="flow-switch" aria-hidden="true"><i></i></span>' +
       "</button></div>";
   }
@@ -812,7 +812,7 @@
     const sum = arr.reduce((a, s) => a + slotLive(s), 0);
     const tail = Math.abs(sum) < 0.005
       ? "тишина"
-      : (sum > 0 ? "+" : "−") + Math.abs(sum).toFixed(2) + " пп/ч";
+      : (sum > 0 ? "+" : "−") + Math.abs(sum).toFixed(2) + " %/ч";
     return '<div class="flow-group"><span>' + title + "</span>" +
       '<span class="mono' + (Math.abs(sum) < 0.005 ? " is-off" : "") + '">' + tail + "</span></div>" +
       arr.map(flowRow).join("");
@@ -825,7 +825,7 @@
     return '<section class="card"><div class="between"><h2 style="margin:0">Потоки</h2>' +
       '<span class="chip mono">' + on + " / " + S.slots.length + "</span></div>" +
       '<div class="flows-topline"><span class="hint-mini">тап — включить, удержание — настройка</span>' +
-        '<b class="mono">' + (Math.abs(sum) < 0.005 ? "баланс ровный" : sign + Math.abs(sum).toFixed(2) + " пп/ч") + "</b></div>" +
+        '<b class="mono">' + (Math.abs(sum) < 0.005 ? "баланс ровный" : sign + Math.abs(sum).toFixed(2) + " %/ч") + "</b></div>" +
       '<div class="flows">' +
         flowGroup("drain", "съедают") +
         flowGroup("stab", "возвращают") +
@@ -837,7 +837,7 @@
     if (!r.drain_start) return "";
     return '<section class="card"><div class="between"><h2 style="margin:0">Эпизод идёт</h2>' +
       '<span class="mono" id="drainClock" style="font-size:22px">' + hhmm(Date.now() - r.drain_start).slice(0, 5) + "</span></div>" +
-      '<p class="note">' + (r.pending_entry ? "Вход " + S.config.entry_cost + " пп уже списан." : "Вход не списан: склейка с предыдущим эпизодом.") + "</p>" +
+      '<p class="note">' + (r.pending_entry ? "Вход " + S.config.entry_cost + " % уже списан." : "Вход не списан: склейка с предыдущим эпизодом.") + "</p>" +
       '<div class="row"><button type="button" class="primary" data-act="return">Вернулся</button></div></section>';
   }
 
@@ -921,7 +921,7 @@
     save();
     closeModal();
     render();
-    toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " пп" : "Утро чистое, потолок полный"));
+    toast(already ? "Снова считаю по меткам" : (morningPenalty() ? "Потолок дня −" + morningPenalty() + " %" : "Утро чистое, потолок полный"));
   }
 
   function openMorningSheet() {
@@ -1070,7 +1070,7 @@
         if (c.note) sub.push(c.note.length > 60 ? c.note.slice(0, 60) + "…" : c.note);
         return '<div class="item"><div class="between">' +
           "<span>" + fmtDate(c.at) + " " + fmtTime(c.at) + " · " + (c.base == null ? "—" : c.base.toFixed(1) + "%") + "</span>" +
-          (dtxt ? '<span class="chip">' + dtxt + " пп</span>" : "") +
+          (dtxt ? '<span class="chip">' + dtxt + " %</span>" : "") +
           '</div><div class="d">' + esc(sub.join(" · ")) + "</div></div>";
       }).join("") + "</div></section>";
   }
@@ -1126,13 +1126,13 @@
 
     h += '<section class="card"><div class="label">' + (last ? "точка сохранения" : "первая точка") + "</div>" +
       '<h2 style="margin:var(--s2) 0 var(--s3)">Ресурс</h2>' +
-      '<p class="note">Состояние на сегодня, не оценка. Дельта — к прошлому чекпоинту. Шаг ползунка — 1.75 пп базы.</p>' +
+      '<p class="note">Состояние на сегодня, не оценка. Дельта — к прошлому чекпоинту. Шаг ползунка — 1.75 % базы.</p>' +
       Object.keys(STATS).map((k) => slider("stats", k, STATS[k], sv[k], prevStats ? prevStats[k] : null, hints[k] || "")).join("") +
       "</section>";
 
     h += '<section class="card"><div class="label">дебаффы</div>' +
       '<h2 style="margin:var(--s2) 0 var(--s3)">Что тянет вниз</h2>' +
-      '<p class="note">Шаг ползунка — 0.75 пп базы. Пометка «из данных» подставлена из журнала, её можно поправить.</p>' +
+      '<p class="note">Шаг ползунка — 0.75 % базы. Пометка «из данных» подставлена из журнала, её можно поправить.</p>' +
       Object.keys(DEBUFFS).map((k) => slider("debuffs", k, DEBUFFS[k], dv[k], prevDebuffs ? prevDebuffs[k] : null, hints[k] || "")).join("") +
       "</section>";
 
@@ -1276,7 +1276,7 @@
     const maxIntr = Math.max(1, ...rows.map((r) => r.intr));
     h += '<section class="card"><div class="between"><div class="label">переключения</div>' +
       '<span class="chip">' + tot.intr + " шт.</span></div>" +
-      '<p class="note">Каждый вход стоит ' + S.config.entry_cost + " пп. Входы ближе " + S.config.merge_gap_min + " минут считаются одним.</p>" +
+      '<p class="note">Каждый вход стоит ' + S.config.entry_cost + " %. Входы ближе " + S.config.merge_gap_min + " минут считаются одним.</p>" +
       '<div class="stat" style="margin-top:var(--s3)">' +
       rows.map((r) => barRow(r.label, r.intr, maxIntr, "")).join("") + "</div></section>";
 
@@ -1359,7 +1359,7 @@
 
     return '<section class="card"><div class="label">база заряда</div>' +
       '<div class="big ' + (db > 0 ? "big--lime" : db < 0 ? "" : "big--mute") + '" style="margin-top:var(--s2)">' +
-        (db > 0 ? "+" : "") + db.toFixed(1) + '<small>пп</small></div>' +
+        (db > 0 ? "+" : "") + db.toFixed(1) + '<small>%</small></div>' +
       '<p class="note" style="margin-top:var(--s3)">' + ba + "% → " + bb + "% · " +
         (days === 1 ? "день" : days + " дн.") + " между точками</p>" +
       '<div class="tabs-text" style="margin:var(--s4) 0 0"><span class="chip">' + fmtDate(a.date) + " → " + fmtDate(b.date) + "</span></div></section>" +
@@ -1446,7 +1446,7 @@
     if (old) old.remove();
     const chip = document.createElement("span");
     chip.className = "delta" + (d > 0 ? " is-plus" : "");
-    chip.textContent = (d > 0 ? "+" : "−") + Math.abs(d).toFixed(2) + " пп";
+    chip.textContent = (d > 0 ? "+" : "−") + Math.abs(d).toFixed(2) + " %";
     card.appendChild(chip);
     setTimeout(() => chip.remove(), 1200);
   }
@@ -1472,7 +1472,7 @@
     }
     const v = liveValue(); if (v == null) return;
     val.innerHTML = v.toFixed(2) + "<span>%</span>";
-    const sp = $("#heroSpent"); if (sp) sp.textContent = "потрачено " + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " пп";
+    const sp = $("#heroSpent"); if (sp) sp.textContent = "потрачено " + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " %";
     const bd = $("#heroBadge"); if (bd) bd.innerHTML = statusBadge(v);
     const proj = projection(), ep = hoursToEvening();
     const pv = $("#heroProj"); if (pv) pv.textContent = proj.toFixed(1);
@@ -1515,7 +1515,7 @@
     const charged = chargeEntry();
     r.drain_start = Date.now(); r.pending_entry = charged; r.merged = !charged;
     save(); render();
-    toast(charged ? "Вход −" + S.config.entry_cost + " пп · пауза восстановления " + S.config.residue_min + " мин" : "Склейка с прошлым эпизодом, вход не списан");
+    toast(charged ? "Вход −" + S.config.entry_cost + " % · пауза восстановления " + S.config.residue_min + " мин" : "Склейка с прошлым эпизодом, вход не списан");
   }
 
   function endEpisode() {
@@ -1721,7 +1721,7 @@
                 const charged = chargeEntry();
                 S.interruptions.push({ id: uuid(), updated_at: nowISO(), started_at: new Date(Date.now() - m * 60000).toISOString(), ended_at: nowISO(), duration_min: m, entry_charged: charged, merged: !charged });
                 save(); closeModal(); render();
-                toast("Записано " + m + " мин, вход " + (charged ? "−" + S.config.entry_cost + " пп" : "не списан"));
+                toast("Записано " + m + " мин, вход " + (charged ? "−" + S.config.entry_cost + " %" : "не списан"));
               } }
           ]
         });
@@ -1754,7 +1754,7 @@
         if (!chargeBattery(-S.config.micro_pause)) return;
         buzz(10);
         r.pause_count++; save(); render();
-        toast("Микропауза +" + S.config.micro_pause + " пп · " + r.pause_count + " из " + S.config.micro_pause_limit);
+        toast("Микропауза +" + S.config.micro_pause + " % · " + r.pause_count + " из " + S.config.micro_pause_limit);
         break;
       case "emergency":
         r.emergency = !r.emergency; r.status = r.emergency ? "recovery" : "active";
@@ -1821,7 +1821,7 @@
     if (note) {
       note.textContent = d == null
         ? "первая база цикла: " + (old != null ? "было " + old + "%" : "нет прошлой точки")
-        : (d > 0 ? "+" : "") + d.toFixed(1) + " пп к базе" + (old != null ? " " + old + "%" : "");
+        : (d > 0 ? "+" : "") + d.toFixed(1) + " % к базе" + (old != null ? " " + old + "%" : "");
     }
   }
 
@@ -1934,7 +1934,7 @@
             const pp = S.config.drain_coef * (Number(s.weight) || 0) * drainMult() * (m / 60);
             if (pp > 0) chargeBattery(pp);
             save(); closeModal(); render();
-            toast("Эпизод " + m + " мин · " + (entry ? "вход −" + entry + " · " : "") + "объём −" + pp.toFixed(2) + " пп");
+            toast("Эпизод " + m + " мин · " + (entry ? "вход −" + entry + " · " : "") + "объём −" + pp.toFixed(2) + " %");
           } }
       ]
     });
@@ -1950,7 +1950,7 @@
     if (s.kind === "drain") {
       fields.push({ key: "mode", label: "Как используется", type: "select", value: s.mode || "capture",
         options: [
-          { v: "capture", l: "Захват внимания — за вход списывается " + S.config.entry_cost + " пп" },
+          { v: "capture", l: "Захват внимания — за вход списывается " + S.config.entry_cost + " %" },
           { v: "ambient", l: "Фон — только объём, без входа" }
         ] });
     }
@@ -2663,13 +2663,13 @@
       html:
         "<p><b>База</b> — из чекпоинта: 70% средних статов плюс 30% от отсутствия дебаффов. У стартового профиля это 22%.</p>" +
         "<p><b>Заряд</b> идёт в реальном времени: потребитель забирает 0.06 × вес в час, стабилизатор возвращает 0.05 × вес. Считается даже при закрытом приложении.</p>" +
-        "<p><b>Вход</b> — включение потребителя в режиме «захват» стоит " + S.config.entry_cost + " пп сразу и на " + S.config.residue_min + " минут останавливает восстановление. Слот в режиме «фон» входа не платит, только объём. Повторное включение раньше чем через " + S.config.merge_gap_min + " минут склеивается.</p>" +
+        "<p><b>Вход</b> — включение потребителя в режиме «захват» стоит " + S.config.entry_cost + " % сразу и на " + S.config.residue_min + " минут останавливает восстановление. Слот в режиме «фон» входа не платит, только объём. Повторное включение раньше чем через " + S.config.merge_gap_min + " минут склеивается.</p>" +
         "<p><b>Долгие сессии</b> — после " + S.config.session_soft_min + " минут непрерывного потребления минута дороже в " + S.config.session_mult + " раза: приложение предложит проверить, всё ли ещё смотрите.</p>" +
-        "<p><b>Окно</b> — не бесплатно: " + S.config.window_rate + " пп/час. Отдых восстанавливает хуже, чем кажется.</p>" +
-        "<p><b>Долг</b> — заряд может уйти ниже нуля до " + S.config.debt_floor + " пп. Отрицательное значение значит, что вы тратите вперёд.</p>" +
-        "<p><b>Сон</b> — внутри вашего окна заряд растёт на " + S.config.night_recharge + " пп/час, но только если потребители выключены. Потолок равен базе, урезанной по прошлой ночи.</p>" +
+        "<p><b>Окно</b> — не бесплатно: " + S.config.window_rate + " %/час. Отдых восстанавливает хуже, чем кажется.</p>" +
+        "<p><b>Долг</b> — заряд может уйти ниже нуля до " + S.config.debt_floor + " %. Отрицательное значение значит, что вы тратите вперёд.</p>" +
+        "<p><b>Сон</b> — внутри вашего окна заряд растёт на " + S.config.night_recharge + " %/час, но только если потребители выключены. Потолок равен базе, урезанной по прошлой ночи.</p>" +
         "<p><b>Форма дня</b> — суточный ритм минус накопленная усталость. Ритм даёт пик около 10 утра, спад после обеда и второй подъём к 18:00; усталость растёт от часов бодрствования и от недосыпа. Форма умножает расход: в провале тот же слот стоит дороже, чем утром, — при 90% множитель 1.05, при 40% около 1.5.</p>" +
-        "<p><b>Работа и дорога</b> — отдельный расход, по умолчанию около 0.5 пп/час.</p>" +
+        "<p><b>Работа и дорога</b> — отдельный расход, по умолчанию около 0.5 %/час.</p>" +
         "<p class=\"note\">Все коэффициенты — калибровка, а не измерение. Форма модели опирается на исследования, числа подбираются под ваши ощущения за два-три чекпоинта.</p>",
       actions: [{ label: "Понятно", kind: "primary", onClick: closeModal }]
     });
