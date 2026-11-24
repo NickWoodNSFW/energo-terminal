@@ -700,24 +700,6 @@ h2{font-size:26px;line-height:1.12;letter-spacing:-.015em}
 .hero .cell i.wane{background:rgba(226,241,99,.40)}
 .hero .cell i.deep{background:linear-gradient(180deg,var(--lime),#b9cf3a)}
 
-/* обгоревшая кромка: рваный верх у заливки той ячейки, что горит сейчас */
-.hero .cell.is-burn i.wane{background:linear-gradient(180deg,#f3ffb0 0%,rgba(226,241,99,.78) 18%,rgba(226,241,99,.42) 60%,rgba(226,241,99,.30) 100%)}
-.hero .cell.is-burn i.wane::after{
-  content:"";position:absolute;left:-3px;right:-3px;top:-9px;height:11px;
-  background:#f2ff9a;pointer-events:none;
-  filter:drop-shadow(0 -1px 2px rgba(226,241,99,.55));
-  -webkit-clip-path:polygon(0 42%,7% 26%,14% 56%,22% 18%,30% 50%,38% 12%,46% 46%,54% 8%,62% 48%,70% 20%,78% 54%,86% 26%,94% 46%,100% 34%,100% 100%,0 100%);
-  clip-path:polygon(0 42%,7% 26%,14% 56%,22% 18%,30% 50%,38% 12%,46% 46%,54% 8%,62% 48%,70% 20%,78% 54%,86% 26%,94% 46%,100% 34%,100% 100%,0 100%)
-}
-.hero .cell.is-burn:nth-child(3n+2) i.wane::after{
-  -webkit-clip-path:polygon(0 30%,8% 52%,16% 22%,24% 58%,32% 30%,40% 10%,48% 42%,56% 16%,64% 52%,72% 24%,80% 48%,88% 14%,96% 44%,100% 28%,100% 100%,0 100%);
-  clip-path:polygon(0 30%,8% 52%,16% 22%,24% 58%,32% 30%,40% 10%,48% 42%,56% 16%,64% 52%,72% 24%,80% 48%,88% 14%,96% 44%,100% 28%,100% 100%,0 100%)
-}
-.hero .cell.is-burn:nth-child(3n) i.wane::after{
-  -webkit-clip-path:polygon(0 50%,6% 22%,13% 46%,20% 14%,28% 44%,36% 20%,44% 52%,52% 26%,60% 46%,68% 12%,76% 40%,84% 56%,92% 22%,100% 42%,100% 100%,0 100%);
-  clip-path:polygon(0 50%,6% 22%,13% 46%,20% 14%,28% 44%,36% 20%,44% 52%,52% 26%,60% 46%,68% 12%,76% 40%,84% 56%,92% 22%,100% 42%,100% 100%,0 100%)
-}
-
 /* график: полоса с рамкой, чтобы линия не висела в пустоте */
 .hero .spark{margin-top:var(--s3);padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .hero .spark svg{height:40px}
