@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v51";
+  const BUILD = "et-v53";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -664,6 +664,7 @@
       '<div class="battery">' +
         '<div class="bat-shell"><div class="bat-cells" id="batCells">' + cells + "</div></div>" +
         '<div class="bat-nub"></div>' +
+        '<div class="bat-fx" id="heroZone" aria-hidden="true"></div>' +
       "</div>" +
       '<div class="bars-axis"><span>0 %</span><b style="left:' + clamp(v, 0, 100).toFixed(1) + '%">сейчас</b><span>100 %</span></div>' +
       '<div class="legend">' +
@@ -780,18 +781,15 @@
   }
 
   function flowRow(s) {
-    const w = Number(s.weight) || 0;
     const inWin = S.runtime.status === "cooling";
     const residue = isResidue();
     const zeroed = !s.active || inWin || (residue && s.kind === "stab");
-    const rate = slotRate(s);
     const live = s.active && slotMinutes(s.id) >= 1 ? hhmm(slotMinutes(s.id) * 60000).slice(0, 5) : "";
     const sub = [esc(s.trigger),
       s.context !== "any" ? (s.context === "mechanical" ? "механика" : "когнитивная") : "",
       s.mode === "ambient" ? "фон" : "",
       live ? "идёт " + live : "",
       zeroed && s.active ? "не влияет" : ""].filter(Boolean).join(" · ");
-    const num = w > 0 ? (rate > 0 ? "+" : "−") + Math.abs(rate).toFixed(2) : "0.00";
 
     return '<div class="flow flow--' + s.kind + (s.active ? " is-on" : "") + (s.id === toggledId ? " is-just" : "") + '">' +
       '<button type="button" class="flow-main" data-tog="' + s.id + '" aria-pressed="' + (s.active ? "true" : "false") + '"' +
@@ -801,7 +799,6 @@
           '<span class="flow-name">' + esc(s.title) + "</span>" +
           '<span class="flow-sub">' + sub + "</span>" +
         "</span>" +
-        '<span class="flow-num' + (zeroed ? " is-off" : "") + (w > 0 ? "" : " is-zero") + '">' + num + "<i>%/ч</i></span>" +
         '<span class="flow-switch" aria-hidden="true"><i></i></span>' +
       "</button></div>";
   }
@@ -1409,6 +1406,7 @@
     if (activeTab === "checkpoint") updateBasePreview();
     updateLive();
     animateHero();
+    startFx();
     toggledId = null;
     painted = true;
   }
@@ -1451,6 +1449,116 @@
     setTimeout(() => chip.remove(), 1200);
   }
 
+  // трата на экране: искры у кромки уровня и целое число
+  let fxOn = false, lastSpentInt = null;
+  const fxDemo = (typeof location !== "undefined" && /[?&]fx=demo/.test(location.search || ""));
+  function fxReduce() {
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; }
+  }
+
+  function batGeo() {
+    if (activeTab !== "home") return null;
+    const zone = $("#heroZone");
+    const v = liveValue();
+    if (!zone || !zone.isConnected || v == null) return null;
+    const cells = zone.parentElement.querySelector(".bat-cells");
+    if (!cells) return null;
+    const cb = cells.getBoundingClientRect(), zb = zone.getBoundingClientRect();
+    if (cb.width < 20) return null;
+    return { zone: zone, cb: cb, zb: zb, v: v };
+  }
+
+  // угли тлеют внутри пилюли над заливкой, срез даёт overflow самой ячейки
+  const EMBER_TONES = ["#ff7a6b", "#ff9f5a", "#ffc46b", "#f2e08a", "#ff6a58"];
+
+  function emberSpot() {
+    if (activeTab !== "home") return null;
+    const cells = $("#batCells");
+    const v = liveValue();
+    if (!cells || v == null || cells.children.length !== 10) return null;
+    const idx = clamp(Math.floor(clamp(v, 0, 99.99) / 10), 0, 9);
+    const cell = cells.children[idx];
+    if (!cell) return null;
+    const cur = clamp(v - idx * 10, 0, 10) * 10;
+    const free = 100 - cur;
+    if (free < 12) return null;
+    const top = 100 - cur;
+    const band = Math.min(free, 52);
+    const lo = Math.max(3, top - band);
+    const hi = Math.min(96, top - 5);
+    return hi > lo ? { cell: cell, lo: lo, hi: hi } : null;
+  }
+
+  let emberN = 0;
+
+  function emitEmber() {
+    const s = emberSpot();
+    if (!s) return;
+    const e = document.createElement("span");
+    e.className = "ember";
+    const tone = EMBER_TONES[(Math.random() * EMBER_TONES.length) | 0];
+    const size = 3.2 + Math.random() * (Math.random() < 0.28 ? 5.4 : 3);
+    const lane = (emberN++ % 5);
+    e.style.left = (lane * 18 + 5 + Math.random() * 11).toFixed(1) + "%";
+    e.style.top = (s.lo + Math.random() * (s.hi - s.lo)).toFixed(1) + "%";
+    e.style.width = size.toFixed(1) + "px";
+    e.style.height = size.toFixed(1) + "px";
+    e.style.background = "radial-gradient(circle,#fff7e6 0%,#ffd9a0 34%," + tone + " 72%)";
+    e.style.boxShadow = "0 0 " + Math.round(7 + size * 1.6) + "px " + tone + ",0 0 " + Math.round(3 + size * .6) + "px rgba(255,240,210,.9)";
+    s.cell.appendChild(e);
+    const dx = (Math.random() * 2 - 1) * 5, dy = -(6 + Math.random() * 20);
+    const d = 1000 + Math.random() * 800;
+    e.animate([
+      { transform: "translate(0,2px) scale(.5)", opacity: 0 },
+      { transform: "translate(" + (dx * .3) + "px," + (dy * .25) + "px) scale(1)", opacity: 1, offset: .2 },
+      { transform: "translate(" + (dx * .7) + "px," + (dy * .6) + "px) scale(.95)", opacity: .85, offset: .55 },
+      { transform: "translate(" + dx + "px," + dy + "px) scale(.7)", opacity: 0 }
+    ], { duration: d, easing: "cubic-bezier(.3,.5,.4,1)" });
+    setTimeout(() => e.remove(), d + 80);
+  }
+
+  function spendChip(n) {
+    const g = batGeo();
+    if (!g || !n) return;
+    const el = document.createElement("span");
+    el.className = "bat-chip";
+    el.textContent = "−" + n + " %";
+    const edge = g.cb.left - g.zb.left + g.cb.width * clamp(g.v, 0, 100) / 100;
+    el.style.left = clamp(g.v > 74 ? edge - 58 : edge + 10, 4, Math.max(4, g.zb.width - 58)).toFixed(1) + "px";
+    el.style.top = (g.cb.top - g.zb.top + g.cb.height * 0.26).toFixed(1) + "px";
+    g.zone.appendChild(el);
+    el.animate([
+      { transform: "translateY(4px) scale(.9)", opacity: 0 },
+      { transform: "translateY(0) scale(1)", opacity: 1, offset: .16 },
+      { transform: "translateY(-14px) scale(1)", opacity: .95, offset: .62 },
+      { transform: "translateY(-26px) scale(.96)", opacity: 0 }
+    ], { duration: 1700, easing: "cubic-bezier(.22,1,.36,1)" });
+    setTimeout(() => el.remove(), 1780);
+  }
+
+  function fxLoop(demoLeft) {
+    if (!fxOn) return;
+    const r = rateOf(), home = activeTab === "home" && !document.hidden && !fxReduce();
+    if (home && (r < -0.02 || demoLeft > 0)) {
+      const power = Math.abs(r);
+      emitEmber();
+      if (power > 1.2 || demoLeft > 0) emitEmber();
+      if (power > 2.4 || demoLeft > 0) emitEmber();
+      if (demoLeft > 0 && demoLeft % 4 === 1) spendChip(1);
+      setTimeout(() => fxLoop(demoLeft > 0 ? demoLeft - 1 : 0),
+        demoLeft > 0 ? 520 : clamp(1500 / (1 + power * 1.1), 280, 1400));
+    } else {
+      setTimeout(() => fxLoop(demoLeft), home ? 700 : 2200);
+    }
+  }
+
+  function startFx() {
+    if (fxOn) return;
+    if (fxReduce() || liveValue() == null) return;
+    fxOn = true;
+    fxLoop(fxDemo ? 40 : 0);
+  }
+
   function updateLive() {
     const wc = $("#workClock");
     if (wc && workActive() && S.runtime.work.started_at) {
@@ -1472,7 +1580,12 @@
     }
     const v = liveValue(); if (v == null) return;
     val.innerHTML = v.toFixed(2) + "<span>%</span>";
-    const sp = $("#heroSpent"); if (sp) sp.textContent = "потрачено " + Math.max(0, (S.runtime.base || 0) - v).toFixed(2) + " %";
+    const sp = $("#heroSpent");
+    const spent = Math.max(0, (S.runtime.base || 0) - v);
+    if (sp) sp.textContent = "потрачено " + spent.toFixed(2) + " %";
+    const spentInt = Math.floor(spent);
+    if (lastSpentInt != null && spentInt > lastSpentInt) spendChip(spentInt - lastSpentInt);
+    lastSpentInt = spentInt;
     const bd = $("#heroBadge"); if (bd) bd.innerHTML = statusBadge(v);
     const proj = projection(), ep = hoursToEvening();
     const pv = $("#heroProj"); if (pv) pv.textContent = proj.toFixed(1);
@@ -1955,8 +2068,12 @@
         ] });
     }
     fields.push({ key: "hook", label: "Метки автоматизации", value: s.hook || "" });
+    const lr = slotLive(s);
+    const rateTxt = Math.abs(lr) < 0.005 ? "0.00" : (lr > 0 ? "+" : "−") + Math.abs(lr).toFixed(2);
     openModal({
       title: "Настроить слот",
+      html: '<p class="note">Сейчас слот даёт <b>' + rateTxt + " %/ч</b>" +
+        (s.active ? "" : " — выключен") + "</p>",
       fields,
       actions: [
         { label: "Отмена", onClick: closeModal },
