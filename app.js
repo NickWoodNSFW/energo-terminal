@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v59";
+  const BUILD = "et-v60";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -224,11 +224,12 @@
     if (d.getTime() <= afterTs) d.setDate(d.getDate() + 1);
     return d.getTime();
   }
-  function isNight() {
-    const d = new Date(), cur = d.getHours() * 60 + d.getMinutes();
+  function isNightAt(ts) {
+    const d = new Date(ts == null ? Date.now() : ts), cur = d.getHours() * 60 + d.getMinutes();
     const a = toMin(S.config.sleep_from), b = toMin(S.config.sleep_to);
     return a <= b ? (cur >= a && cur < b) : (cur >= a || cur < b);
   }
+  function isNight() { return isNightAt(Date.now()); }
   function sleepRef() {
     const o = S.runtime.sleep_last;
     if (!o || !o.from || !o.to) return null;
@@ -387,10 +388,10 @@
     return slotMinutes(id) > soft ? (Number(S.config.session_mult) || 1.5) : 1;
   }
 
-  function rateOf() {
+  function rateMode(night) {
     if (S.runtime.status === "cooling") return -Math.abs(Number(S.config.window_rate) || 0.15);
     const drainsOn = S.slots.some((s) => s.active && s.kind === "drain");
-    if (isNight() && !drainsOn && !workActive()) return S.config.night_recharge;
+    if (night && isNight() && !drainsOn && !workActive()) return S.config.night_recharge;
     const mult = drainMult() * formMult();
     let r = 0;
     if (workActive()) r -= S.config.drain_coef * (Number(S.runtime.work.weight) || 0) * mult;
@@ -405,6 +406,7 @@
     }
     return r;
   }
+  function rateOf() { return rateMode(true); }
 
   function ceiling() {
     if (S.runtime.base == null) return 100;
@@ -457,18 +459,42 @@
   }
   function isStale() { return S.runtime.base != null && gapHours() > gapLimit(); }
 
+  // Разрыв считается по отрезкам: ночные часы дают сон, дневные — расход.
+  // Иначе утреннее открытие приложения записывало бы всю ночь по дневной ставке.
+  function gapSplit(from, to) {
+    const t0 = from || 0, t1 = to == null ? Date.now() : to;
+    if (!t0 || !(t1 > t0)) return { night: 0, day: 0 };
+    const step = 5 * 60000;
+    let night = 0, day = 0;
+    for (let s = t0; s < t1; s += step) {
+      const dt = Math.min(step, t1 - s) / 3600000;
+      if (isNightAt(s + step / 2)) night += dt; else day += dt;
+    }
+    return { night: night, day: day };
+  }
+  function nightRateFor() {
+    if (S.runtime.status === "cooling") return rateMode(false);
+    const drainsOn = S.slots.some((s) => s.active && s.kind === "drain");
+    if (drainsOn || workActive()) return rateMode(false);
+    return Number(S.config.night_recharge) || 0;
+  }
+  function accrueFrom(b0, from, to, ceil) {
+    const g = gapSplit(from, to);
+    const v = b0 + g.night * nightRateFor() + Math.min(g.day, gapLimit()) * rateMode(false);
+    return clamp(v, floorValue(), ceil == null ? ceiling() : ceil);
+  }
+
   function liveValueAt(ceil) {
     const r = S.runtime;
     if (r.base == null) return null;
     const b0 = r.battery == null ? r.base : r.battery;
-    const dtH = Math.min(gapHours(), gapLimit());
-    return clamp(b0 + rateOf() * dtH, floorValue(), ceil == null ? ceiling() : ceil);
+    return accrueFrom(b0, Date.parse(r.battery_at) || 0, Date.now(), ceil == null ? ceiling() : ceil);
   }
-  function liveValue() { return liveValueAt(dayCeiling()); }
+  function liveValue() { return liveValueAt(ceiling()); }
 
   function projection() {
     const v = liveValue(); if (v == null) return null;
-    return clamp(v + rateOf() * hoursToEvening().hours, 0, dayCeiling());
+    return clamp(v + rateOf() * hoursToEvening().hours, 0, Math.max(dayCeiling(), v));
   }
 
   function projectionRaw() {
@@ -512,8 +538,7 @@
     const t0 = Date.parse(r.battery_at) || 0;
     if (!t0) return null;
     const b0 = r.battery == null ? r.base : r.battery;
-    const dtH = clamp((ts - t0) / 3600000, 0, gapLimit());
-    return clamp(b0 + rateOf() * dtH, floorValue(), ceiling());
+    return accrueFrom(b0, t0, ts, ceiling());
   }
 
   function dayRec(ts) {
@@ -845,10 +870,11 @@
     }
     const lv = levelOf(v), ceil = dayCeiling(), proj = projection(), ep = hoursToEvening();
     const f = sleepFactor();
+    const lockAt = Math.max(ceil, v);
     const cells = Array.from({ length: 10 }, (_, i) => {
       const cur = clamp((v - i * 10) / 10, 0, 1) * 100;
       const fut = clamp((proj - i * 10) / 10, 0, 1) * 100;
-      const locked = i * 10 >= ceil ? " is-locked" : "";
+      const locked = i * 10 >= lockAt ? " is-locked" : "";
       return '<span class="cell' + locked + '"><i class="wane" style="height:' + cur.toFixed(1) + '%"></i><i class="deep" style="height:' + fut.toFixed(1) + '%"></i></span>';
     }).join("");
     return '<section class="card hero" style="--lvl:' + lv.c1 + ';--lvl-2:' + lv.c2 + '">' +
