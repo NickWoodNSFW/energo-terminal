@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v56";
+  const BUILD = "et-v59";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -61,6 +61,7 @@
       config: {
         checkpoint_interval_days: 14, legit_window_limit: 2, legit_window_min: 45, scout_min: 5,
         drain_coef: 0.06, stab_coef: 0.05, entry_cost: 0.6, residue_min: 20, merge_gap_min: 10,
+        recovery_min: 30, max_gap_h: 6,
         night_recharge: 3.0, micro_pause: 1.5, micro_pause_limit: 3, work_weight: 8,
         sleep_from: "23:00", sleep_to: "07:00", sleep_target: 7.5, sleep_drain_k: 0.5,
         window_rate: 0.15, debt_floor: -20, session_soft_min: 30, session_mult: 1.5
@@ -83,8 +84,8 @@
         work: { active: false, started_at: null, weight: 8, updated_at: null },
         pause_day: null, pause_count: 0, sleep_override: null, sleep_last: null, morning: null,
         drain_start: null, drain_slot: null, pending_entry: false, merged: false,
-        residue_until: null, last_entry_at: null, hook_log: [],
-        slot_on: {}, warned: {}, samples: []
+        residue_until: null, recovery_until: null, last_entry_at: null, hook_log: [],
+        slot_on: {}, warned: {}, samples: [], days: {}, _sig: ""
       }
     };
   }
@@ -110,6 +111,8 @@
     }
     const cap = Date.now() + p.config.residue_min * 60000;
     if (p.runtime.residue_until && p.runtime.residue_until > cap) p.runtime.residue_until = cap;
+    const rcap = Date.now() + (Number(p.config.recovery_min) || 0) * 60000;
+    if (p.runtime.recovery_until && p.runtime.recovery_until > rcap) p.runtime.recovery_until = rcap;
     return p;
   }
 
@@ -171,6 +174,16 @@
     return withData.slice(1).reduce((acc, x) => mergeStates(acc, x.state), withData[0].state);
   }
 
+  function runtimeSignature(r) {
+    if (!r) return "";
+    const c = {};
+    for (const k of Object.keys(r).sort()) {
+      if (k === "updated_at" || k === "battery" || k === "battery_at" || k === "samples" || k === "_sig") continue;
+      c[k] = r[k];
+    }
+    return JSON.stringify(c);
+  }
+
   function save(opts) {
     try {
       if (!hasData(S) && storedHasData()) {
@@ -179,7 +192,12 @@
         if (!opts || opts.sync !== false) scheduleSync();
         return;
       }
-      if (S.runtime) S.runtime.updated_at = nowISO();
+      // Время правки состояния поднимается только при настоящем изменении:
+      // иначе обе стороны всегда «свежее» и затирают друг друга целиком.
+      if (S.runtime) {
+        const sig = runtimeSignature(S.runtime);
+        if (sig !== S.runtime._sig) { S.runtime._sig = sig; S.runtime.updated_at = nowISO(); }
+      }
       localStorage.setItem(KEY, JSON.stringify(S));
       if (S.checkpoints.length > 0) localStorage.setItem(BACKUP_KEY, JSON.stringify(S));
     } catch (e) { toast("Не удалось сохранить: хранилище заполнено"); }
@@ -234,7 +252,15 @@
 
   function drainMult() { return 1 + (1 - sleepFactor()) * Number(S.config.sleep_drain_k || 0.5); }
   function workActive() { return !!(S.runtime.work && S.runtime.work.active); }
-  function isResidue() { const u = S.runtime.residue_until; return !!(u && Date.now() < u); }
+  function residueEnd() {
+    const a = Number(S.runtime.residue_until) || 0;
+    const b = Number(S.runtime.recovery_until) || 0;
+    return Math.max(a, b);
+  }
+  function isResidue() { return Date.now() < residueEnd(); }
+  function isRecovery() {
+    return (Number(S.runtime.recovery_until) || 0) >= residueEnd() && isResidue();
+  }
 
   const CIRCADIAN = [[0, 0.10], [4, 0.15], [6, 0.35], [8, 0.75], [10, 0.95], [12, 0.80],
     [14, 0.60], [16, 0.72], [18, 0.76], [20, 0.64], [22, 0.40], [24, 0.10]];
@@ -420,11 +446,22 @@
   function dayCeiling() { return Math.max(0, ceiling() - morningPenalty()); }
   function floorValue() { const f = Number(S.config.debt_floor); return isNaN(f) ? 0 : Math.min(0, f); }
 
+  function gapHours() {
+    const t = Date.parse(S.runtime.battery_at);
+    if (!t) return 0;
+    return Math.max(0, (Date.now() - t) / 3600000);
+  }
+  function gapLimit() {
+    const g = Number(S.config.max_gap_h);
+    return isNaN(g) || g <= 0 ? 6 : g;
+  }
+  function isStale() { return S.runtime.base != null && gapHours() > gapLimit(); }
+
   function liveValueAt(ceil) {
     const r = S.runtime;
     if (r.base == null) return null;
     const b0 = r.battery == null ? r.base : r.battery;
-    const dtH = Math.max(0, (Date.now() - Date.parse(r.battery_at)) / 3600000);
+    const dtH = Math.min(gapHours(), gapLimit());
     return clamp(b0 + rateOf() * dtH, floorValue(), ceil == null ? ceiling() : ceil);
   }
   function liveValue() { return liveValueAt(dayCeiling()); }
@@ -462,7 +499,154 @@
     S.runtime.battery = round2(v);
     S.runtime.battery_at = nowISO();
     pushSample(v);
+    digestValue21();
     save();
+  }
+
+  // ─────────────────────────── дневная сводка по часам ───────────────────────────
+  // Модель линейна, поэтому значение можно посчитать назад во времени:
+  // отсюда вечерний ресурс восстанавливается, даже если приложение не было открыто.
+  function valueAt(ts) {
+    const r = S.runtime;
+    if (r.base == null) return null;
+    const t0 = Date.parse(r.battery_at) || 0;
+    if (!t0) return null;
+    const b0 = r.battery == null ? r.base : r.battery;
+    const dtH = clamp((ts - t0) / 3600000, 0, gapLimit());
+    return clamp(b0 + rateOf() * dtH, floorValue(), ceiling());
+  }
+
+  function dayRec(ts) {
+    const t = ts == null ? Date.now() : ts;
+    const key = localDayKey(t);
+    const days = S.runtime.days || (S.runtime.days = {});
+    let rec = days[key];
+    if (!rec || typeof rec !== "object") rec = days[key] = {};
+    if (!Array.isArray(rec.e) || rec.e.length !== 24) rec.e = new Array(24).fill(0);
+    if (!Array.isArray(rec.m) || rec.m.length !== 24) rec.m = new Array(24).fill(0);
+    if (typeof rec.f !== "number") rec.f = 0;
+    if (typeof rec.w !== "number") rec.w = 0;
+    if (rec.v21 === undefined) rec.v21 = null;
+    return rec;
+  }
+
+  function pruneDays() {
+    const days = S.runtime.days || {};
+    const cut = Date.now() - 60 * 864e5;
+    for (const k of Object.keys(days)) {
+      const t = Date.parse(k + "T00:00:00");
+      if (!isNaN(t) && t < cut) delete days[k];
+    }
+  }
+
+  function digestAdd(kind, n, ts) {
+    const t = ts == null ? Date.now() : ts;
+    if (!t || isNaN(t)) return;
+    const rec = dayRec(t);
+    const h = new Date(t).getHours();
+    if (kind === "entry") rec.e[h] += Math.max(1, Number(n) || 1);
+    else if (kind === "mark") rec.m[h] += Math.max(1, Number(n) || 1);
+    else if (kind === "focus") rec.f += Number(n) || 0;
+    else if (kind === "work") rec.w += Number(n) || 0;
+    pruneDays();
+  }
+
+  function digestValue21() {
+    if (S.runtime.base == null) return false;
+    const now = new Date();
+    if (now.getHours() < 21) return false;
+    const rec = dayRec(now.getTime());
+    if (rec.v21 != null) return false;
+    const t21 = new Date(now);
+    t21.setHours(21, 0, 0, 0);
+    const v = valueAt(t21.getTime());
+    if (v == null) return false;
+    rec.v21 = round1(v);
+    return true;
+  }
+
+  // ─────────────────── профиль по часам и факты-предупреждения ───────────────────
+  function profileWindow(n) {
+    const span = n || 28;
+    const all = S.runtime.days || {};
+    const keys = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < span; i++) {
+      const k = localDayKey(today.getTime() - i * 864e5);
+      if (all[k]) keys.push(k);
+    }
+    const hours = new Array(24).fill(0);
+    const daysWithE = new Array(24).fill(0);
+    const evenings = [];
+    let totalEntries = 0, withEntries = 0;
+    for (const k of keys) {
+      const rec = all[k] || {};
+      const ee = Array.isArray(rec.e) ? rec.e : [];
+      let day = 0;
+      for (let h = 0; h < 24; h++) {
+        const v = Number(ee[h]) || 0;
+        if (v > 0) { hours[h] += v; daysWithE[h]++; day += v; }
+      }
+      totalEntries += day;
+      if (day > 0) withEntries++;
+      if (rec.v21 != null) evenings.push(Number(rec.v21));
+    }
+    let peak = 0;
+    for (let h = 1; h < 24; h++) if (hours[h] > hours[peak]) peak = h;
+    return {
+      span: span, days: keys.length, withEntries: withEntries,
+      hours: hours, daysWithE: daysWithE, totalEntries: totalEntries, peak: peak,
+      perDay: withEntries ? Math.round((totalEntries / withEntries) * 10) / 10 : null,
+      evening: median(evenings)
+    };
+  }
+
+  function hh(h) { return String(h).padStart(2, "0") + ":00"; }
+
+  // Дни с метками утром против тихих — по вечернему заряду.
+  function morningSplit() {
+    const all = S.runtime.days || {};
+    const noisy = [], calm = [];
+    for (const k of Object.keys(all)) {
+      const rec = all[k] || {};
+      if (rec.v21 == null) continue;
+      const mm = Array.isArray(rec.m) ? rec.m : [];
+      let mk = 0;
+      for (let h = 5; h <= 10; h++) mk += Number(mm[h]) || 0;
+      (mk >= 2 ? noisy : calm).push(Number(rec.v21));
+    }
+    if (noisy.length < 3 || calm.length < 3) return null;
+    const a = median(noisy), b = median(calm);
+    if (a == null || b == null) return null;
+    return { noisy: noisy.length, calm: calm.length, d: round1(a - b) };
+  }
+
+  // Один факт на действие: без оценки, только то, что видно в журнале.
+  function adviceForEntry(when) {
+    const p = profileWindow(28);
+    if (p.days < 3) return null;
+    const at = when || new Date();
+    const h = at.getHours();
+    const rec = (S.runtime.days || {})[localDayKey(Date.now())] || {};
+    const ee = Array.isArray(rec.e) ? rec.e : [];
+    const hStart = new Date(at);
+    hStart.setMinutes(0, 0, 0);
+    let inHour = Number(ee[h]) || 0;
+    for (const x of S.interruptions || []) {
+      const t = Date.parse(x.started_at);
+      if (!isNaN(t) && t >= hStart.getTime() && t <= at.getTime()) inHour++;
+    }
+    if (inHour >= 1) {
+      return "Второй вход за этот час: первый стоил " + S.config.entry_cost + " %, и " +
+        S.config.recovery_min + " минут фокус не возвращается.";
+    }
+    const hits = p.daysWithE[h];
+    if (hits >= 3 && hits >= p.days * 0.4) {
+      return "За " + p.days + " дн. в " + hh(h) + " вы включали в " + hits + " из них" +
+        (p.evening != null ? ". Обычный вечер — " + round1(p.evening) + " %" : "") + ".";
+    }
+    return null;
   }
 
   function baseFrom(cp) {
@@ -509,6 +693,17 @@
     S.runtime.last_entry_at = nowISO();
     S.runtime.residue_until = t + S.config.residue_min * 60000;
     save();
+    return true;
+  }
+
+  // После выключения потребителя внимание возвращается не сразу:
+  // пока идёт окно восстановления, стабилизаторы не работают.
+  function startRecovery(s) {
+    if (!s || s.kind !== "drain" || s.mode === "ambient") return false;
+    const min = Number(S.config.recovery_min) || 0;
+    if (min <= 0) return false;
+    const until = Date.now() + min * 60000;
+    if (until > (Number(S.runtime.recovery_until) || 0)) S.runtime.recovery_until = until;
     return true;
   }
 
@@ -594,7 +789,8 @@
 
   function statusBadge(value) {
     const debt = value != null && value < 0 ? '<span class="badge badge--pause"><span class="dot"></span>долг</span> ' : "";
-    if (isResidue()) return debt + '<span class="badge badge--pause"><span class="dot"></span>пауза ' + hhmm(S.runtime.residue_until - Date.now()) + "</span>";
+    if (isResidue()) return debt + '<span class="badge badge--pause"><span class="dot"></span>' +
+      (isRecovery() ? "восстановление " : "пауза ") + hhmm(residueEnd() - Date.now()) + "</span>";
     const r = rateOf();
     if (r > 0.02) return debt + '<span class="badge badge--up"><span class="dot"></span>+' + r.toFixed(2) + " %/ч" + (isNight() ? " · сон" : "") + "</span>";
     if (r < -0.02) return debt + '<span class="badge badge--down"><span class="dot"></span>' + r.toFixed(2) + " %/ч</span>";
@@ -674,6 +870,8 @@
         '<span class="live"><i class="dot"></i><span id="heroProj">' + proj.toFixed(1) + "</span>% " + ep.label.toLowerCase() + "</span>" +
       "</div>" +
       sparkBlock() +
+      (isStale() ? '<p class="note" id="staleNote">Опора старше ' + Math.round(gapHours()) +
+        " ч — расход после неё не досчитывается, чтобы не выдумывать долг.</p>" : "") +
       '<div class="sleepline"><span>Сон <b class="mono">' + fmtDur(lastNightHours()) + "</b> · потолок <b class=\"mono\">" +
         Math.round(f * 100) + "%</b> · расход <b class=\"mono\">×" + drainMult().toFixed(2) + "</b></span>" +
         '<button type="button" class="link" data-sheet="sleep">Изменить</button></div>' +
@@ -1029,6 +1227,51 @@
   }
 
   // ── подсказки из собранных данных ──
+  function median(arr) {
+    const a = (arr || []).filter((x) => typeof x === "number" && !isNaN(x)).sort((x, y) => x - y);
+    if (!a.length) return null;
+    const m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
+  // Сводка по дням: утренние метки, время до первого дела, заряд в 21:00.
+  function digestStats(from) {
+    const all = S.runtime.days || {};
+    const keys = Object.keys(all).filter((k) => {
+      const t = Date.parse(k + "T00:00:00");
+      return !isNaN(t) && t >= from;
+    }).sort();
+    const marks = [], starts = [], evenings = [];
+    for (const k of keys) {
+      const rec = all[k] || {};
+      const noon = Date.parse(k + "T12:00:00");
+      if (isNaN(noon)) continue;
+      const wake = wakeMoment(noon);
+      const h0 = new Date(wake).getHours();
+      let mk = 0;
+      for (let i = 0; i < 2; i++) {
+        const h = h0 + i;
+        if (h >= 0 && h < 24 && rec.m) mk += Number(rec.m[h]) || 0;
+      }
+      marks.push(mk);
+      let first = null;
+      for (const s of S.sessions || []) {
+        if (s.type !== "focus" && s.type !== "work") continue;
+        const t = Date.parse(s.started_at);
+        if (isNaN(t) || localDayKey(t) !== k) continue;
+        if (first == null || t < first) first = t;
+      }
+      if (first != null) starts.push(Math.round((first - wake) / 60000));
+      if (rec.v21 != null) evenings.push(Number(rec.v21));
+    }
+    return {
+      days: keys.length,
+      marks: median(marks),
+      initiativeMin: median(starts),
+      evening: median(evenings)
+    };
+  }
+
   function cycleStats() {
     const cp = lastCP();
     const from = cp ? Date.parse(cp.date) : 0;
@@ -1041,13 +1284,28 @@
       focusAvg: focus.length ? Math.round(focus.reduce((a, x) => a + x.duration_min, 0) / focus.length) : null,
       focusCount: focus.length,
       newsChecks: cp && cp.behaviors && cp.behaviors.news_checks != null ? Number(cp.behaviors.news_checks) : null,
-      minutesToPhone: cp && cp.behaviors && cp.behaviors.minutes_to_phone != null ? Number(cp.behaviors.minutes_to_phone) : null
+      minutesToPhone: cp && cp.behaviors && cp.behaviors.minutes_to_phone != null ? Number(cp.behaviors.minutes_to_phone) : null,
+      digest: digestStats(from)
     };
   }
   function suggestNewsReflex(n) { return n == null || isNaN(n) ? null : clamp(Math.round(1 + n * 0.6), 1, 10); }
   function suggestMorning(m) { if (m == null || isNaN(m)) return null; return m >= 60 ? 2 : m >= 30 ? 4 : m >= 15 ? 6 : m >= 5 ? 8 : 9; }
   function suggestUnstructured(e) { return e == null ? null : e >= 7 ? 9 : e >= 4 ? 7 : e >= 2 ? 5 : 3; }
   function suggestFocus(avg) { return avg == null ? null : avg >= 40 ? 8 : avg >= 20 ? 7 : avg >= 10 ? 5 : 3; }
+  function suggestClarity(marks, sleep) {
+    if (marks == null) return null;
+    let s = marks <= 0 ? 8 : marks === 1 ? 7 : marks === 2 ? 6 : marks <= 4 ? 5 : 4;
+    if (sleep != null && sleep < 0.85) s -= 1;
+    return clamp(Math.round(s), 1, 10);
+  }
+  function suggestInitiative(min) {
+    if (min == null) return null;
+    return clamp(Math.round(min <= 20 ? 9 : min <= 40 ? 8 : min <= 60 ? 7 : min <= 90 ? 6 : min <= 150 ? 5 : 4), 1, 10);
+  }
+  function suggestEvening(v) {
+    if (v == null) return null;
+    return clamp(Math.round(v >= 18 ? 8 : v >= 14 ? 7 : v >= 10 ? 6 : v >= 6 ? 5 : 4), 1, 10);
+  }
 
   function checksBlock() {
     const all = (S.checks || []).slice().sort((a, b) => (String(a.at || "") < String(b.at || "") ? 1 : -1));
@@ -1083,18 +1341,37 @@
     const prevDebuffs = prev ? prev.debuffs : null;
 
     const cs = cycleStats();
+    const ds = cs.digest || { days: 0 };
     const sug = {
+      ram_clarity: suggestClarity(ds.marks, sleepFactor()),
+      start_initiative: suggestInitiative(ds.initiativeMin),
       focus_hold: suggestFocus(cs.focusAvg),
+      evening_resource: suggestEvening(ds.evening),
       morning_scroll: suggestMorning(cs.minutesToPhone),
       news_reflex: suggestNewsReflex(cs.newsChecks),
       unstructured_avoid: suggestUnstructured(cs.entriesPerDay)
     };
     const sv = Object.assign({}, cur.stats);
     const dv = Object.assign({}, cur.debuffs);
-    if (sug.focus_hold != null) sv.focus_hold = sug.focus_hold;
+    // Расчёт не может двигать стат больше чем на два пункта за период:
+    // иначе ползунок становится эхом заряда, а не оценкой.
+    const capShift = (next, was) => (next == null || was == null ? next : clamp(next, was - 2, was + 2));
+    ["ram_clarity", "start_initiative", "focus_hold", "evening_resource"].forEach((k) => {
+      const v = capShift(sug[k], cur.stats[k]);
+      if (v != null) sv[k] = v;
+    });
     ["morning_scroll", "news_reflex", "unstructured_avoid"].forEach((k) => { if (sug[k] != null) dv[k] = sug[k]; });
     const hints = {
+      ram_clarity: ds.marks != null
+        ? "из данных: " + Math.round(ds.marks) + " " + plural(Math.round(ds.marks), ["метка", "метки", "меток"]) + " за утро, по " + ds.days + " дн."
+        : "мало данных — оцените сами",
+      start_initiative: ds.initiativeMin != null
+        ? "из данных: первый фокус через " + ds.initiativeMin + " мин после подъёма"
+        : "мало данных — оцените сами",
       focus_hold: cs.focusCount ? "из данных: подход " + cs.focusAvg + " мин, их " + cs.focusCount : "нет замеров фокуса",
+      evening_resource: ds.evening != null
+        ? "из данных: в 21:00 — " + round1(ds.evening) + " %"
+        : "мало данных — оцените сами",
       morning_scroll: cs.minutesToPhone != null ? "из данных: телефон через " + cs.minutesToPhone + " мин" : "нет данных",
       news_reflex: cs.newsChecks != null ? "из данных: " + cs.newsChecks + " проверок в день" : "нет данных",
       unstructured_avoid: "из данных: " + cs.entriesPerDay + " переключений в день"
@@ -1219,6 +1496,31 @@
       '<span class="stat-num">' + value + "</span></div>";
   }
 
+  function hourProfileBlock() {
+    const p = profileWindow(28);
+    if (!p.days) return "";
+    const max = Math.max(1, ...p.hours);
+    let body = "";
+    for (let h = 6; h <= 23; h++) {
+      if (!p.hours[h] && h !== p.peak) continue;
+      body += barRow(hh(h), p.hours[h], max, h === p.peak && p.hours[h] > 0 ? "warm" : "");
+    }
+    const ms = morningSplit();
+    return '<section class="card"><div class="between"><div class="label">профиль</div>' +
+      '<span class="chip">' + p.days + " дн.</span></div>" +
+      '<h2 style="margin:var(--s2) 0 var(--s3)">Когда я это делаю</h2>' +
+      '<p class="note">' + (p.days < 5
+        ? "Данных пока мало: картина станет честной после пяти дней."
+        : "Входов " + p.totalEntries + " за " + p.withEntries + " дн." +
+          (p.perDay != null ? " · " + p.perDay + " в день" : "") +
+          ". Пик — " + hh(p.peak) + ", " + p.hours[p.peak] + " шт.") + "</p>" +
+      '<div class="stat" style="margin-top:var(--s3)">' + body + "</div>" +
+      (ms ? '<p class="note" style="margin-top:var(--s3)">Дни с метками утром заканчивались на ' +
+        Math.abs(ms.d).toFixed(1) + " пп " + (ms.d < 0 ? "ниже" : "выше") +
+        " (" + ms.noisy + " против " + ms.calm + " дн.). Это совпадение, а не причина.</p>" : "") +
+      "</section>";
+  }
+
   function baseSpark(days) {
     const from = Date.now() - days * 864e5;
     const pts = [];
@@ -1266,6 +1568,8 @@
         '<div><div class="label">фокус и работа</div><div class="big">' + round1((tot.focus + tot.work) / 60) + "<small>ч</small></div></div>" +
         '<div><div class="label">меток залипания</div><div class="big">' + tot.marks + "</div></div>" +
       "</div></section>";
+
+    h += hourProfileBlock();
 
     const maxIntr = Math.max(1, ...rows.map((r) => r.intr));
     h += '<section class="card"><div class="between"><div class="label">переключения</div>' +
@@ -1634,6 +1938,7 @@
     accrue();
     const dur = Math.max(1, Math.round((Date.now() - r.drain_start) / 60000));
     S.interruptions.push({ id: uuid(), updated_at: nowISO(), started_at: new Date(r.drain_start).toISOString(), ended_at: nowISO(), duration_min: dur, entry_charged: !!r.pending_entry, merged: !!r.merged });
+    digestAdd("entry", 1, r.drain_start);
     r.drain_start = null; r.pending_entry = false; r.merged = false;
     save(); render(); toast("Эпизод записан: " + dur + " мин");
   }
@@ -1813,6 +2118,7 @@
         {
           const dur = Math.round((Date.now() - r.focus_start) / 60000);
           S.sessions.push({ id: uuid(), updated_at: nowISO(), started_at: new Date(r.focus_start).toISOString(), finished_at: nowISO(), type: "focus", duration_min: dur, completed: true });
+          digestAdd("focus", dur, r.focus_start);
           r.focus_start = null; r.last_work_end = nowISO(); save(); render(); toast("Подход: " + dur + " мин");
         }
         break;
@@ -1830,6 +2136,7 @@
                 if (!m || m <= 0) { toast("Нужна длительность"); return; }
                 const charged = chargeEntry();
                 S.interruptions.push({ id: uuid(), updated_at: nowISO(), started_at: new Date(Date.now() - m * 60000).toISOString(), ended_at: nowISO(), duration_min: m, entry_charged: charged, merged: !charged });
+                digestAdd("entry", 1, Date.now() - m * 60000);
                 save(); closeModal(); render();
                 toast("Записано " + m + " мин, вход " + (charged ? "−" + S.config.entry_cost + " %" : "не списан"));
               } }
@@ -1843,6 +2150,7 @@
         } else {
           const dur = Math.round((Date.now() - Date.parse(r.work.started_at)) / 60000);
           S.sessions.push({ id: uuid(), updated_at: nowISO(), started_at: r.work.started_at, finished_at: nowISO(), type: "work", duration_min: dur, completed: true });
+          digestAdd("work", dur, Date.parse(r.work.started_at));
           r.work.active = false; r.work.started_at = null; r.work.updated_at = nowISO(); r.last_work_end = nowISO();
           save(); render(); toast("Рабочий день закончен: " + round1(dur / 60) + " ч");
         }
@@ -2017,7 +2325,9 @@
             { label: "Выключить", kind: "primary", onClick: () => {
                 s.active = false; s.updated_at = nowISO();
                 delete S.runtime.slot_on[s.id];
-                save(); closeModal(); render(); toast("Слот выключен");
+                const rec = startRecovery(s);
+                save(); closeModal(); render();
+                toast("Слот выключен" + (rec ? " · восстановление " + S.config.recovery_min + " мин" : ""));
               } }
           ]
         });
@@ -2188,6 +2498,11 @@
     out.runtime = Object.assign({}, a.runtime, JSON.parse(JSON.stringify(pick)));
     out.runtime.samples = samples;
     out.runtime.updated_at = pick.updated_at || a.runtime.updated_at;
+    // Заряд — отдельно от остального runtime: побеждает не «кто позже записал»,
+    // а тот снимок, у которого свежее опорная точка battery_at.
+    const ba = at(a.runtime.battery_at, 0);
+    const bb = at(b.runtime.battery_at, skew);
+    if (bb > ba) { out.runtime.battery = b.runtime.battery; out.runtime.battery_at = b.runtime.battery_at; }
     const wa = at(a.runtime.work && a.runtime.work.updated_at, 0);
     const wb = at(b.runtime.work && b.runtime.work.updated_at, skew);
     if (wb > wa) {
@@ -2203,9 +2518,14 @@
     const cpNew = cpsAll[cpsAll.length - 1];
     if (cpNew && cpNew.base_battery != null && at(cpNew.date, 0) > at(out.runtime.cp_at, 0)) {
       out.runtime.base = cpNew.base_battery;
-      out.runtime.battery = cpNew.base_battery;
-      out.runtime.battery_at = cpNew.date;
       out.runtime.cp_at = cpNew.date;
+      // База чекпоинта подхватывается только как опора на будущее.
+      // Переякоревать заряд задним числом нельзя: иначе пересчёт от старой
+      // даты выдумывает сутки расхода (22 % на 25.11 → −0.69 % на 26.11).
+      if (at(cpNew.date, 0) > at(out.runtime.battery_at, 0)) {
+        out.runtime.battery = cpNew.base_battery;
+        out.runtime.battery_at = cpNew.date;
+      }
     }
     return migrate(out);
   }
@@ -2390,6 +2710,7 @@
   function logHook(hook, on, atMs) {
     const log = S.runtime.hook_log || (S.runtime.hook_log = []);
     log.push({ h: hook, on: !!on, at: new Date(atMs || Date.now()).toISOString() });
+    if (on) digestAdd("mark", 1, atMs || Date.now());
     S.runtime.hook_log = log.slice(-400);
   }
 
@@ -2451,6 +2772,7 @@
       } else {
         s.active = false; s.updated_at = nowISO();
         if (S.runtime.slot_on) delete S.runtime.slot_on[s.id];
+        startRecovery(s);
         if (hrs > 0.01) {
           const cur = liveValue();
           if (cur != null) {
@@ -2778,6 +3100,7 @@
         "<p><b>База</b> — из чекпоинта: 70% средних статов плюс 30% от отсутствия дебаффов. У стартового профиля это 22%.</p>" +
         "<p><b>Заряд</b> идёт в реальном времени: потребитель забирает 0.06 × вес в час, стабилизатор возвращает 0.05 × вес. Считается даже при закрытом приложении.</p>" +
         "<p><b>Вход</b> — включение потребителя в режиме «захват» стоит " + S.config.entry_cost + " % сразу и на " + S.config.residue_min + " минут останавливает восстановление. Слот в режиме «фон» входа не платит, только объём. Повторное включение раньше чем через " + S.config.merge_gap_min + " минут склеивается.</p>" +
+        "<p><b>Восстановление</b> — после выключения потребителя внимание возвращается не сразу: " + S.config.recovery_min + " минут стабилизаторы не считаются, потому что фокус ещё не вернулся. Пока идёт это окно, на карточке заряда горит «восстановление».</p>" +
         "<p><b>Долгие сессии</b> — после " + S.config.session_soft_min + " минут непрерывного потребления минута дороже в " + S.config.session_mult + " раза: приложение предложит проверить, всё ли ещё смотрите.</p>" +
         "<p><b>Окно</b> — не бесплатно: " + S.config.window_rate + " %/час. Отдых восстанавливает хуже, чем кажется.</p>" +
         "<p><b>Долг</b> — заряд может уйти ниже нуля до " + S.config.debt_floor + " %. Отрицательное значение значит, что вы тратите вперёд.</p>" +
@@ -2821,12 +3144,16 @@
         }
         save();
         const charged = s.active && s.kind === "drain" && s.mode !== "ambient" ? chargeEntry() : false;
+        const rec = s.active ? false : startRecovery(s);
+        const tip = s.active && s.kind === "drain" ? adviceForEntry() : null;
         toggledId = s.id;
         buzz(s.active ? 14 : 8);
         const after = projectionRaw(); render();
         toast(s.title + ": " + (s.active ? "включён" : "выключен") +
           (charged ? " · вход −" + S.config.entry_cost : (s.active && s.mode === "ambient" ? " · фон, без входа" : "")) +
+          (rec ? " · восстановление " + S.config.recovery_min + " мин" : "") +
           projDelta(before, after));
+        if (tip) setTimeout(() => { toast(tip); }, 2750);
       };
     });
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
