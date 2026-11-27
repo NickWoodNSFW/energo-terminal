@@ -43,7 +43,7 @@
     const s = size || 16;
     return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
   }
-  const BUILD = "et-v60";
+  const BUILD = "et-v63";
 
   const STATS = { ram_clarity: "Оперативка", start_initiative: "Старт", focus_hold: "Фокус", evening_resource: "Ресурс" };
   const DEBUFFS = { morning_scroll: "Утренний захват", unstructured_avoid: "Непереносимость пустого времени", news_reflex: "Новостной рефлекс", task_paralysis: "Паралич перед стартом" };
@@ -729,6 +729,26 @@
     if (min <= 0) return false;
     const until = Date.now() + min * 60000;
     if (until > (Number(S.runtime.recovery_until) || 0)) S.runtime.recovery_until = until;
+    return true;
+  }
+
+  function recoveryAsk(s, onGo) {
+    if (!s || s.active) return false;
+    if (s.kind !== "drain" || s.mode === "ambient") return false;
+    if (!isRecovery()) return false;
+    const key = Number(S.runtime.recovery_until) || 0;
+    if (!S.runtime.rec_warn || S.runtime.rec_warn.until !== key) S.runtime.rec_warn = { until: key, ids: {} };
+    if (S.runtime.rec_warn.ids[s.id]) return false;
+    S.runtime.rec_warn.ids[s.id] = true;
+    save();
+    openModal({
+      title: "Внимание сгорит",
+      html: "<p>То, что возвращается сейчас, уйдёт обратно. Возвращать придётся заново.</p>",
+      actions: [
+        { label: "Оставить выключенным", kind: "primary", onClick: closeModal },
+        { label: "Включить всё равно", onClick: () => { closeModal(); onGo(); } },
+      ],
+    });
     return true;
   }
 
@@ -1708,12 +1728,66 @@
   function renderTabs() {
     const box = $("#tabs");
     if (!box) return;
-    box.innerHTML = TABS.map(([k, l]) =>
-      '<button type="button" role="tab" aria-selected="' + (k === activeTab) + '" data-tab="' + k + '">' + l + "</button>").join("");
-    $$("#tabs button").forEach((b) => { b.onclick = () => { activeTab = b.dataset.tab; render(); }; });
+    if (!box.querySelector(".tabs__pill")) box.insertAdjacentHTML("afterbegin", '<i class="tabs__pill" aria-hidden="true"></i>');
+    $$("#tabs button").forEach((b) => b.remove());
+    box.insertAdjacentHTML("beforeend", TABS.map(([k, l]) =>
+      '<button type="button" role="tab" aria-selected="' + (k === activeTab) + '" data-tab="' + k + '">' + l + "</button>").join(""));
+    $$("#tabs button").forEach((b) => { b.onclick = () => goTab(b.dataset.tab); });
+    movePill();
+  }
+
+  function movePill() {
+    const box = $("#tabs");
+    const pill = box && box.querySelector(".tabs__pill");
+    const btn = box && box.querySelector('button[aria-selected="true"]');
+    if (!pill || !btn) return;
+    const first = pill.dataset.placed !== "1";
+    if (first) pill.style.transition = "none";
+    pill.style.width = btn.offsetWidth + "px";
+    pill.style.transform = "translateX(" + btn.offsetLeft + "px)";
+    if (first) {
+      pill.dataset.placed = "1";
+      void pill.offsetWidth;
+      pill.style.transition = "";
+    }
+  }
+
+  function goTab(k) {
+    if (!k || k === activeTab || !TABS.some((t) => t[0] === k)) return;
+    activeTab = k;
+    render();
+  }
+
+  function initSwipe() {
+    const BAN = "input,textarea,select,button,a,[contenteditable],.tabs,.modal.is-open,.modal__box";
+    let st = null;
+    document.addEventListener("pointerdown", (e) => {
+      if (e.button != null && e.button !== 0) { st = null; return; }
+      if (e.target.closest(BAN)) { st = null; return; }
+      st = { x: e.clientX, y: e.clientY, t: Date.now(), ok: false };
+    }, { passive: true });
+    document.addEventListener("pointermove", (e) => {
+      if (!st) return;
+      const dx = e.clientX - st.x, dy = e.clientY - st.y;
+      if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.3) st.ok = true;
+    }, { passive: true });
+    document.addEventListener("pointerup", (e) => {
+      const s = st; st = null;
+      if (!s || !s.ok) return;
+      const dx = e.clientX - s.x, dy = e.clientY - s.y;
+      if (Date.now() - s.t > 900) return;
+      if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+      const i = TABS.findIndex((t) => t[0] === activeTab);
+      const j = dx < 0 ? i + 1 : i - 1;
+      if (j < 0 || j >= TABS.length) return;
+      buzz(6);
+      goTab(TABS[j][0]);
+    });
+    document.addEventListener("pointercancel", () => { st = null; });
   }
 
   let painted = false;
+  let lastTab = null;
 
   function render() {
     renderTabs();
@@ -1722,11 +1796,20 @@
     const v = $("#view");
     if (!v) return;
     if (document.body) document.body.dataset.paint = painted ? "ready" : "first";
+    const prev = lastTab;
+    lastTab = activeTab;
     v.innerHTML = activeTab === "home" ? renderHome()
       : activeTab === "capture" ? renderCapture()
       : activeTab === "checkpoint" ? renderCheckpoint()
       : activeTab === "stats" ? renderStats()
       : renderMirror();
+    if (prev != null && prev !== activeTab) {
+      const from = TABS.findIndex((t) => t[0] === prev);
+      const to = TABS.findIndex((t) => t[0] === activeTab);
+      v.classList.remove("slide-l", "slide-r");
+      void v.offsetWidth;
+      v.classList.add(to > from ? "slide-l" : "slide-r");
+    }
     bind();
     const fab = $("#fabBtn");
     if (fab) fab.classList.toggle("is-off", activeTab === "stats");
@@ -3158,28 +3241,32 @@
       b.onclick = () => {
         if (b.dataset.long) { delete b.dataset.long; return; }
         const s = S.slots.find((x) => x.id === b.dataset.tog);
-        const before = projectionRaw();
-        s.active = !s.active; s.updated_at = nowISO();
-        if (!S.runtime.slot_on) S.runtime.slot_on = {};
-        if (!S.runtime.warned) S.runtime.warned = {};
-        if (s.active) {
-          S.runtime.slot_on[s.id] = Date.now();
-          S.runtime.warned[s.id] = false;
-        } else {
-          delete S.runtime.slot_on[s.id];
-        }
-        save();
-        const charged = s.active && s.kind === "drain" && s.mode !== "ambient" ? chargeEntry() : false;
-        const rec = s.active ? false : startRecovery(s);
-        const tip = s.active && s.kind === "drain" ? adviceForEntry() : null;
-        toggledId = s.id;
-        buzz(s.active ? 14 : 8);
-        const after = projectionRaw(); render();
-        toast(s.title + ": " + (s.active ? "включён" : "выключен") +
-          (charged ? " · вход −" + S.config.entry_cost : (s.active && s.mode === "ambient" ? " · фон, без входа" : "")) +
-          (rec ? " · восстановление " + S.config.recovery_min + " мин" : "") +
-          projDelta(before, after));
-        if (tip) setTimeout(() => { toast(tip); }, 2750);
+        const applyToggle = () => {
+          const before = projectionRaw();
+          s.active = !s.active; s.updated_at = nowISO();
+          if (!S.runtime.slot_on) S.runtime.slot_on = {};
+          if (!S.runtime.warned) S.runtime.warned = {};
+          if (s.active) {
+            S.runtime.slot_on[s.id] = Date.now();
+            S.runtime.warned[s.id] = false;
+          } else {
+            delete S.runtime.slot_on[s.id];
+          }
+          save();
+          const charged = s.active && s.kind === "drain" && s.mode !== "ambient" ? chargeEntry() : false;
+          const rec = s.active ? false : startRecovery(s);
+          const tip = s.active && s.kind === "drain" ? adviceForEntry() : null;
+          toggledId = s.id;
+          buzz(s.active ? 14 : 8);
+          const after = projectionRaw(); render();
+          toast(s.title + ": " + (s.active ? "включён" : "выключен") +
+            (charged ? " · вход −" + S.config.entry_cost : (s.active && s.mode === "ambient" ? " · фон, без входа" : "")) +
+            (rec ? " · восстановление " + S.config.recovery_min + " мин" : "") +
+            projDelta(before, after));
+          if (tip) setTimeout(() => { toast(tip); }, 2750);
+        };
+        if (recoveryAsk(s, applyToggle)) return;
+        applyToggle();
       };
     });
     $$("[data-edit]").forEach((b) => { b.onclick = () => editSlot(b.dataset.edit); });
@@ -3449,6 +3536,8 @@
       if (navigator.storage.persist) navigator.storage.persist().then((v) => { if (v) persistedFlag = true; }).catch(() => {});
     }
   } catch (e) { /* нет Storage API */ }
+
+  initSwipe();
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
